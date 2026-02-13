@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter":{"platforms":{"android":{"default":{"projectId":"sudoq-online","appId":"1:777088106689:android:1e8432c097e1dd859fd440","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"sudoq-online","configurations":{"android":"1:777088106689:android:1e8432c097e1dd859fd440","ios":"1:777088106689:ios:cc76a0e4aeeb5cc09fd440"}}}}
+}

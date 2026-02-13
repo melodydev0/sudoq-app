@@ -1,0 +1,39 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Flutter: Run Android (terminal – hot reload: r)",
+            "type": "shell",
+            "command": "flutter run -d emulator-5554",
+            "options": {
+                "cwd": "${workspaceFolder}/sudoku_app",
+                "env": {}
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Flutter: Run Windows (terminal – hot reload: r)",
+            "type": "shell",
+            "command": "flutter run -d windows",
+            "options": {
+                "cwd": "${workspaceFolder}/sudoku_app",
+                "env": {}
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "777088106689",
+    "project_id": "sudoq-online",
+    "storage_bucket": "sudoq-online.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777088106689:android:1e8432c097e1dd859fd440",
+        "android_client_info": {
+          "package_name": "com.sudoq.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCng01EnuOc0KgRoHF7BD-MQfNAOqW85bc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
