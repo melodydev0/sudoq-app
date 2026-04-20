@@ -1,0 +1,232 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #000;
+}
+
+.screenshot {
+  width: 1440px;
+  height: 2560px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Backgrounds ── */
+.screenshot[data-screen="1"] { background: linear-gradient(165deg, #1a1145 0%, #2e1b6a 45%, #5b3fa0 100%); }
+.screenshot[data-screen="2"] { background: linear-gradient(165deg, #0c1535 0%, #1a2d6e 45%, #3558c0 100%); }
+.screenshot[data-screen="3"] { background: linear-gradient(165deg, #1a0a2e 0%, #4a156a 45%, #9b2daa 100%); }
+.screenshot[data-screen="4"] { background: linear-gradient(165deg, #081420 0%, #10274a 45%, #1e4a8c 100%); }
+.screenshot[data-screen="5"] { background: linear-gradient(165deg, #11102e 0%, #261f60 45%, #4a3d9e 100%); }
+.screenshot[data-screen="6"] { background: linear-gradient(165deg, #160e38 0%, #32195e 45%, #6e3faa 100%); }
+
+/* ── Radial glow ── */
+.screenshot::before {
+  content: '';
+  position: absolute;
+  width: 1100px;
+  height: 1100px;
+  border-radius: 50%;
+  top: 55%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  filter: blur(250px);
+  opacity: 0.18;
+  pointer-events: none;
+  z-index: 0;
+}
+.screenshot[data-screen="1"]::before { background: #8b5cf6; }
+.screenshot[data-screen="2"]::before { background: #3b82f6; }
+.screenshot[data-screen="3"]::before { background: #d946ef; }
+.screenshot[data-screen="4"]::before { background: #06b6d4; }
+.screenshot[data-screen="5"]::before { background: #818cf8; }
+.screenshot[data-screen="6"]::before { background: #a855f7; }
+
+/* ── Text block ── */
+.text-area {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 130px 90px 0;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.tagline {
+  font-size: 116px;
+  font-weight: 900;
+  color: #ffffff;
+  line-height: 1.08;
+  letter-spacing: -2px;
+  text-shadow: 0 4px 40px rgba(0, 0, 0, 0.35);
+  margin-bottom: 30px;
+}
+
+.subtitle {
+  font-size: 52px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.4;
+  letter-spacing: 0.3px;
+}
+
+/* ── Phone wrapper: sits right below text ── */
+.phone-container {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex: 1;
+  width: 100%;
+  padding-bottom: 0;
+  margin-top: 36px;
+  overflow: hidden;
+}
+
+/* ── Realistic Android phone mockup ── */
+.phone-wrap {
+  position: relative;
+  width: 920px;
+  flex-shrink: 0;
+}
+
+/* Outer shell — aluminium frame */
+.phone-outer {
+  position: relative;
+  background: linear-gradient(135deg, #d8d8dc 0%, #b0b0b8 30%, #c8c8ce 60%, #a8a8b0 100%);
+  border-radius: 86px;
+  padding: 5px;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.25),
+    0 60px 120px rgba(0,0,0,0.7),
+    0 30px 60px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+}
+
+/* Inner bezel */
+.phone-inner {
+  background: #0a0a0c;
+  border-radius: 82px;
+  padding: 12px;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+}
+
+/* Screen area */
+.phone-screen {
+  width: 100%;
+  aspect-ratio: 9 / 19.5;
+  border-radius: 72px;
+  overflow: hidden;
+  background: #f6f5f2;
+  position: relative;
+}
+
+.phone-screen img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+/* Dynamic Island */
+.phone-island {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 160px;
+  height: 44px;
+  background: #0a0a0c;
+  border-radius: 22px;
+  z-index: 10;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* Screen top fade to hide status bar from screenshot */
+.phone-top-fade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 110px;
+  background: linear-gradient(to bottom, #f6f5f2 55%, transparent);
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Screen bottom fade to hide Android nav bar + app bottom nav */
+.phone-bottom-fade {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 300px;
+  background: linear-gradient(to top, #f6f5f2 70%, transparent);
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Ad banner mask for gameplay - solid cover at bottom */
+.ad-mask {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 280px;
+  background: linear-gradient(to bottom, transparent 0%, #f6f5f2 30%, #f6f5f2 100%);
+  z-index: 6;
+}
+
+/* Physical side buttons */
+.phone-btn-volume {
+  position: absolute;
+  left: -10px;
+  top: 220px;
+  width: 8px;
+  border-radius: 4px 0 0 4px;
+  background: linear-gradient(90deg, #888 0%, #b0b0b8 100%);
+  box-shadow: -1px 0 3px rgba(0,0,0,0.4);
+}
+.phone-btn-vol-up  { height: 80px; top: 200px; }
+.phone-btn-vol-dn  { height: 80px; top: 305px; }
+.phone-btn-silent  { height: 54px; top: 165px; }
+
+.phone-btn-power {
+  position: absolute;
+  right: -10px;
+  top: 240px;
+  width: 8px;
+  height: 110px;
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(270deg, #888 0%, #b0b0b8 100%);
+  box-shadow: 1px 0 3px rgba(0,0,0,0.4);
+}
+
+/* ── RTL ── */
+.screenshot[dir="rtl"] .text-area { direction: rtl; }
+.screenshot[dir="rtl"] .tagline,
+.screenshot[dir="rtl"] .subtitle  { direction: rtl; unicode-bidi: bidi-override; }
+
+/* ── CJK adjustments ── */
+.screenshot[data-lang="zh-CN"] .tagline,
+.screenshot[data-lang="ja-JP"] .tagline { letter-spacing: 4px; }
+
+/* ── Hindi/Bengali ── */
+.screenshot[data-lang="hi-IN"] .tagline,
+.screenshot[data-lang="bn-BD"] .tagline { font-size: 98px; line-height: 1.15; }
+
+/* ── Arabic ── */
+.screenshot[data-lang="ar"] .tagline { font-size: 100px; line-height: 1.15; }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import '../../../../core/models/leaderboard_user.dart';
 import '../../../../core/models/achievement.dart';
 import '../../../../core/models/cosmetic_rewards.dart';
@@ -8,6 +8,7 @@ import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme_manager.dart';
+import '../../../../core/widgets/division_badge.dart';
 
 class UserProfileScreen extends StatelessWidget {
   final LeaderboardUser user;
@@ -81,7 +82,7 @@ class UserProfileScreen extends StatelessWidget {
         children: [
           GestureDetector(
             onTap: () {
-              HapticFeedback.lightImpact();
+              HapticService.lightImpact();
               Navigator.pop(context);
             },
             child: Container(
@@ -254,10 +255,9 @@ class UserProfileScreen extends StatelessWidget {
                 isTablet: isTablet,
               ),
               if (user.division != null)
-                _buildInfoChip(
+                _buildDivisionChip(
                   context: context,
-                  icon: Icons.shield,
-                  label: user.division!,
+                  division: user.division!,
                   color: _getDivisionColor(user.division!),
                   isTablet: isTablet,
                 ),
@@ -300,35 +300,70 @@ class UserProfileScreen extends StatelessWidget {
       frame: frame,
       size: avatarSize,
       showAnimation: true,
-      child: Container(
+      child: _buildAvatarContent(isDark, avatarSize, frame),
+    );
+  }
+
+  Widget _buildAvatarContent(bool isDark, double avatarSize, FrameReward? frame) {
+    // When frame is selected, show frame's icon with gradient (like profile)
+    if (frame != null) {
+      return Container(
         width: avatarSize,
         height: avatarSize,
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: 0.2) : Colors.white,
-          borderRadius: BorderRadius.circular(avatarSize * 0.18),
-          border: Border.all(
-            color: user.isOnline ? Colors.green : Colors.transparent,
-            width: 2,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: frame.gradientColors,
           ),
+          borderRadius: BorderRadius.circular(avatarSize * 0.25),
           boxShadow: [
             BoxShadow(
-              color: AppColors.gradientStart.withValues(alpha: 0.3),
+              color: frame.gradientColors.first.withValues(alpha: 0.5),
               blurRadius: 12,
-              offset: const Offset(0, 4),
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-        child: user.avatarUrl != null
-            ? ClipRRect(
-                borderRadius: BorderRadius.circular(avatarSize * 0.15),
-                child: Image.network(
-                  user.avatarUrl!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _buildDefaultAvatar(avatarSize),
-                ),
-              )
-            : _buildDefaultAvatar(avatarSize),
+        child: Center(
+          child: Icon(
+            frame.iconData ?? Icons.star,
+            color: Colors.white,
+            size: avatarSize * 0.5,
+          ),
+        ),
+      );
+    }
+
+    // No frame - show avatar or default
+    return Container(
+      width: avatarSize,
+      height: avatarSize,
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.2) : Colors.white,
+        borderRadius: BorderRadius.circular(avatarSize * 0.18),
+        border: Border.all(
+          color: user.isOnline ? Colors.green : Colors.transparent,
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.gradientStart.withValues(alpha: 0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
+      child: user.avatarUrl != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(avatarSize * 0.15),
+              child: Image.network(
+                user.avatarUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _buildDefaultAvatar(avatarSize),
+              ),
+            )
+          : _buildDefaultAvatar(avatarSize),
     );
   }
 
@@ -356,6 +391,12 @@ class UserProfileScreen extends StatelessWidget {
     final iconSize = isTablet ? 18.0 : 16.0;
     final horizontalPad = isTablet ? 14.0 : 12.0;
     final verticalPad = isTablet ? 8.0 : 6.0;
+    
+    // Darken the color for better text readability
+    final textColor = HSLColor.fromColor(color)
+        .withLightness((HSLColor.fromColor(color).lightness * 0.6).clamp(0.0, 1.0))
+        .withSaturation((HSLColor.fromColor(color).saturation * 1.2).clamp(0.0, 1.0))
+        .toColor();
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -365,12 +406,12 @@ class UserProfileScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20.w),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: iconSize, color: color),
+          Icon(icon, size: iconSize, color: textColor),
           SizedBox(width: 6.w),
           Flexible(
             child: Text(
@@ -378,7 +419,53 @@ class UserProfileScreen extends StatelessWidget {
               style: TextStyle(
                 fontSize: fontSize,
                 fontWeight: FontWeight.w600,
-                color: color,
+                color: textColor,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDivisionChip({
+    required BuildContext context,
+    required String division,
+    required Color color,
+    required bool isTablet,
+  }) {
+    final fontSize = _getResponsiveFontSize(context, 12);
+    final horizontalPad = isTablet ? 14.0 : 12.0;
+    final verticalPad = isTablet ? 8.0 : 6.0;
+
+    final textColor = HSLColor.fromColor(color)
+        .withLightness((HSLColor.fromColor(color).lightness * 0.6).clamp(0.0, 1.0))
+        .withSaturation((HSLColor.fromColor(color).saturation * 1.2).clamp(0.0, 1.0))
+        .toColor();
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: horizontalPad,
+        vertical: verticalPad,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20.w),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DivisionBadge(rank: division, size: isTablet ? 18 : 16),
+          SizedBox(width: 6.w),
+          Flexible(
+            child: Text(
+              division,
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w600,
+                color: textColor,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -581,11 +668,27 @@ class UserProfileScreen extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      badge['icon'] as String,
-                      style: TextStyle(
-                          fontSize: _getResponsiveFontSize(context, 16)),
-                    ),
+                    if (badge['imagePath'] != null)
+                      Image.asset(
+                        badge['imagePath'] as String,
+                        width: _getResponsiveFontSize(context, 20),
+                        height: _getResponsiveFontSize(context, 20),
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Text(
+                            badge['icon'] as String,
+                            style: TextStyle(
+                                fontSize:
+                                    _getResponsiveFontSize(context, 16)),
+                          );
+                        },
+                      )
+                    else
+                      Text(
+                        badge['icon'] as String,
+                        style: TextStyle(
+                            fontSize: _getResponsiveFontSize(context, 16)),
+                      ),
                     SizedBox(width: 6.w),
                     Flexible(
                       child: Text(
@@ -725,9 +828,14 @@ class UserProfileScreen extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            achievement.icon,
-            style: TextStyle(fontSize: _getResponsiveFontSize(context, 18)),
+          Image.asset(
+            achievement.imagePath,
+            width: _getResponsiveFontSize(context, 20),
+            height: _getResponsiveFontSize(context, 20),
+            errorBuilder: (_, __, ___) => Text(
+              achievement.icon,
+              style: TextStyle(fontSize: _getResponsiveFontSize(context, 18)),
+            ),
           ),
           SizedBox(width: 8.w),
           Flexible(
@@ -774,32 +882,36 @@ class UserProfileScreen extends StatelessWidget {
   }
 
   List<Map<String, dynamic>> _getBadgeData(AppLocalizations l10n) {
-    // [Future] Add localization for badge names
     final badgeDefinitions = {
       'early_bird': {
         'name': 'Early Bird',
         'icon': '🐦',
         'colors': [Colors.orange, Colors.deepOrange],
+        'imagePath': 'assets/badges/profile/badge_early_bird.png',
       },
       'week_warrior': {
         'name': 'Week Warrior',
         'icon': '⚔️',
         'colors': [Colors.blue, Colors.indigo],
+        'imagePath': 'assets/badges/profile/badge_week_warrior.png',
       },
       'puzzle_master': {
         'name': 'Puzzle Master',
         'icon': '🧩',
         'colors': [Colors.purple, Colors.deepPurple],
+        'imagePath': 'assets/badges/profile/badge_puzzle_master.png',
       },
       'legend': {
         'name': 'Legend',
         'icon': '🌟',
         'colors': [Colors.amber, Colors.orange],
+        'imagePath': 'assets/badges/profile/badge_legend.png',
       },
       'champion': {
         'name': 'Champion',
         'icon': '🏆',
         'colors': [Colors.pink, Colors.red],
+        'imagePath': 'assets/badges/profile/badge_champion.png',
       },
     };
 

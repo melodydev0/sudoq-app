@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/models/leaderboard_user.dart';
 import '../../../../core/l10n/app_localizations.dart';
@@ -11,6 +11,9 @@ import '../../../../core/services/local_duel_stats_service.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/user_sync_service.dart';
 import '../../../../core/navigation/app_route_observer.dart';
+import '../../../../core/models/cosmetic_rewards.dart';
+import '../../../../core/widgets/animated_frame.dart';
+import '../../../../core/widgets/division_badge.dart';
 import '../widgets/leaderboard_tile.dart';
 import 'user_profile_screen.dart';
 
@@ -86,9 +89,6 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
   }
 
   Future<void> _loadData() async {
-    // Simulate network delay
-    await Future.delayed(const Duration(milliseconds: 300));
-
     // Get real user data
     final levelData = LevelService.levelData;
     final duelStats = LocalDuelStatsService.getAllStats();
@@ -99,8 +99,9 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
 
     // Create current user from real data
     _currentUser = LeaderboardUser(
-      id: 'current_user',
+      id: UserSyncService.currentUserId ?? 'current_user',
       username: AuthService.displayName,
+      avatarUrl: AuthService.photoUrl,
       countryCode: 'TR', // [Future] Get from user settings
       level: levelData.level,
       totalXp: levelData.totalXp,
@@ -119,15 +120,116 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
       isOnline: true,
     );
 
-    // Fetch duel leaderboard from Firestore
-    await _loadDuelLeaderboard();
+    // Fetch both leaderboards from Firestore in parallel
+    await Future.wait([
+      _loadLevelLeaderboard(),
+      _loadDuelLeaderboard(),
+    ]);
 
-    // Level leaderboard - use mock data with current user injected
-    _levelLeaderboard = _generateLevelLeaderboardWithUser();
-
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
+  }
+
+  /// Load Level Leaderboard from Firestore
+  Future<void> _loadLevelLeaderboard() async {
+    try {
+      final cloudData = await UserSyncService.getTopPlayers(
+        orderBy: 'totalXp',
+        limit: 100,
+      );
+
+      if (cloudData.isNotEmpty) {
+        _levelLeaderboard = cloudData.asMap().entries.map((entry) {
+          final index = entry.key;
+          final data = entry.value;
+          return LeaderboardUser(
+            id: data['uid'] ?? 'user_$index',
+            username: data['displayName'] ?? 'Player',
+            avatarUrl: data['photoUrl'] as String?,
+            countryCode: data['countryCode'] ?? 'UN',
+            level: data['level'] ?? 1,
+            totalXp: data['totalXp'] ?? 0,
+            rank: index + 1,
+            gamesWon: data['wins'] ?? 0,
+            perfectGames: 0,
+            winRate: 0.0,
+            rankedPoints: data['elo'] ?? 1000,
+            division: data['rank'] ?? 'Bronze',
+            unlockedAchievementIds: [],
+            equippedBadgeIds: [],
+            equippedFrame: data['selectedFrame'] as String?,
+            joinedAt: DateTime.now(),
+            isOnline: false,
+          );
+        }).toList();
+
+        // Check if current user is in list and update their position
+        final currentUserId = UserSyncService.currentUserId;
+        final currentUserIndex = _levelLeaderboard.indexWhere((u) => u.id == currentUserId);
+        
+        if (currentUserIndex != -1) {
+          // Update current user reference with correct rank
+          _currentUser = LeaderboardUser(
+            id: _currentUser!.id,
+            username: _currentUser!.username,
+            countryCode: _currentUser!.countryCode,
+            level: _currentUser!.level,
+            totalXp: _currentUser!.totalXp,
+            rank: currentUserIndex + 1,
+            gamesWon: _currentUser!.gamesWon,
+            perfectGames: _currentUser!.perfectGames,
+            winRate: _currentUser!.winRate,
+            rankedPoints: _currentUser!.rankedPoints,
+            division: _currentUser!.division,
+            unlockedAchievementIds: _currentUser!.unlockedAchievementIds,
+            equippedBadgeIds: _currentUser!.equippedBadgeIds,
+            equippedFrame: _currentUser!.equippedFrame,
+            joinedAt: _currentUser!.joinedAt,
+            isOnline: _currentUser!.isOnline,
+          );
+        } else if (_currentUser != null) {
+          // User not in top 100, calculate approximate position
+          int position = _levelLeaderboard.length + 1;
+          for (int i = 0; i < _levelLeaderboard.length; i++) {
+            if (_currentUser!.totalXp > _levelLeaderboard[i].totalXp) {
+              position = i + 1;
+              break;
+            }
+          }
+          _currentUser = LeaderboardUser(
+            id: _currentUser!.id,
+            username: _currentUser!.username,
+            countryCode: _currentUser!.countryCode,
+            level: _currentUser!.level,
+            totalXp: _currentUser!.totalXp,
+            rank: position,
+            gamesWon: _currentUser!.gamesWon,
+            perfectGames: _currentUser!.perfectGames,
+            winRate: _currentUser!.winRate,
+            rankedPoints: _currentUser!.rankedPoints,
+            division: _currentUser!.division,
+            unlockedAchievementIds: _currentUser!.unlockedAchievementIds,
+            equippedBadgeIds: _currentUser!.equippedBadgeIds,
+            equippedFrame: _currentUser!.equippedFrame,
+            joinedAt: _currentUser!.joinedAt,
+            isOnline: _currentUser!.isOnline,
+          );
+        }
+      } else {
+        // No data from Firestore - show only current user
+        if (_currentUser != null) {
+          _levelLeaderboard = [_currentUser!];
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading level leaderboard: $e');
+      // Fallback to current user only
+      if (_currentUser != null) {
+        _levelLeaderboard = [_currentUser!];
+      }
+    }
   }
 
   /// Load Duel Leaderboard from Firestore
@@ -146,6 +248,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
           return LeaderboardUser(
             id: data['uid'] ?? 'user_$index',
             username: data['displayName'] ?? 'Player',
+            avatarUrl: data['photoUrl'] as String?,
             countryCode: data['countryCode'] ?? 'UN',
             level: data['level'] ?? 1,
             totalXp: data['totalXp'] ?? 0,
@@ -157,7 +260,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
             division: data['duelRank'] ?? 'Bronze',
             unlockedAchievementIds: [],
             equippedBadgeIds: [],
-            equippedFrame: _getFrameForRP(data['duelElo'] ?? 450),
+            equippedFrame: data['selectedFrame'] as String? ?? _getFrameForRP(data['duelElo'] ?? 450),
             joinedAt: DateTime.now(),
             isOnline: false,
           );
@@ -215,76 +318,6 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
     if (elo >= 1400) return 'ranked_frame_diamond';
     if (elo >= 1100) return 'ranked_frame_platinum';
     return null;
-  }
-
-  /// Generate level leaderboard with current user
-  List<LeaderboardUser> _generateLevelLeaderboardWithUser() {
-    final mockUsers = MockLeaderboardData.getLevelLeaderboard();
-    final levelData = LevelService.levelData;
-    final duelStats = LocalDuelStatsService.getAllStats();
-    final duelWins = duelStats['wins'] as int? ?? 0;
-    final duelLosses = duelStats['losses'] as int? ?? 0;
-    final duelElo = duelStats['elo'] as int? ?? 1000;
-    final duelRank = duelStats['rank'] as String? ?? 'Bronze';
-
-    // Create current user entry for level leaderboard
-    final currentUserLevel = LeaderboardUser(
-      id: 'current_user',
-      username: AuthService.displayName,
-      countryCode: 'TR',
-      level: levelData.level,
-      totalXp: levelData.totalXp,
-      rank: 0,
-      gamesWon: duelWins,
-      perfectGames: 0,
-      winRate: (duelWins + duelLosses) > 0
-          ? (duelWins / (duelWins + duelLosses) * 100)
-          : 0.0,
-      rankedPoints: duelElo,
-      division: duelRank,
-      unlockedAchievementIds: [],
-      equippedBadgeIds: [],
-      equippedFrame: LevelService.selectedFrameId,
-      joinedAt: DateTime.now().subtract(const Duration(days: 7)),
-      isOnline: true,
-    );
-
-    // Insert user into sorted list
-    final allUsers = [...mockUsers];
-    allUsers.add(currentUserLevel);
-
-    // Sort by level (descending), then by XP
-    allUsers.sort((a, b) {
-      final levelCompare = b.level.compareTo(a.level);
-      if (levelCompare != 0) return levelCompare;
-      return b.totalXp.compareTo(a.totalXp);
-    });
-
-    // Update ranks
-    final result = <LeaderboardUser>[];
-    for (int i = 0; i < allUsers.length; i++) {
-      result.add(LeaderboardUser(
-        id: allUsers[i].id,
-        username: allUsers[i].username,
-        avatarUrl: allUsers[i].avatarUrl,
-        countryCode: allUsers[i].countryCode,
-        level: allUsers[i].level,
-        totalXp: allUsers[i].totalXp,
-        rank: i + 1,
-        gamesWon: allUsers[i].gamesWon,
-        perfectGames: allUsers[i].perfectGames,
-        winRate: allUsers[i].winRate,
-        rankedPoints: allUsers[i].rankedPoints,
-        division: allUsers[i].division,
-        unlockedAchievementIds: allUsers[i].unlockedAchievementIds,
-        equippedBadgeIds: allUsers[i].equippedBadgeIds,
-        equippedFrame: allUsers[i].equippedFrame,
-        joinedAt: allUsers[i].joinedAt,
-        isOnline: allUsers[i].isOnline,
-      ));
-    }
-
-    return result;
   }
 
   @override
@@ -370,7 +403,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
           ),
           IconButton(
             onPressed: () {
-              HapticFeedback.lightImpact();
+              HapticService.lightImpact();
               setState(() => _isLoading = true);
               _loadData();
             },
@@ -489,6 +522,110 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
     );
   }
 
+  FrameReward? _frameById(String id) {
+    for (final f in CosmeticRewards.frames) {
+      if (f.id == id) return f;
+    }
+    for (final f in CosmeticRewards.rankedFrames) {
+      if (f.id == id) return f;
+    }
+    return null;
+  }
+
+  Widget _buildCurrentUserAvatar(AppThemeColors theme, double avatarSize) {
+    // Get frame if user has one equipped
+    FrameReward? frame;
+    if (_currentUser!.equippedFrame != null && _currentUser!.equippedFrame!.isNotEmpty) {
+      frame = _frameById(_currentUser!.equippedFrame!);
+    }
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        AnimatedAvatarFrame(
+          frame: frame,
+          size: avatarSize,
+          showAnimation: frame != null,
+          child: _buildCurrentUserAvatarContent(theme, avatarSize, frame),
+        ),
+        // Country flag
+        Positioned(
+          bottom: -4,
+          right: -4,
+          child: Container(
+            padding: EdgeInsets.all(2.w),
+            decoration: BoxDecoration(
+              color: theme.card,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: theme.textPrimary.withValues(alpha: 0.1),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+            child: Text(
+              _currentUser!.countryFlag,
+              style: TextStyle(fontSize: _getResponsiveFontSize(10)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCurrentUserAvatarContent(AppThemeColors theme, double avatarSize, FrameReward? frame) {
+    // When frame is selected, show frame's icon with gradient
+    if (frame != null) {
+      return Container(
+        width: avatarSize,
+        height: avatarSize,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: frame.gradientColors,
+          ),
+          borderRadius: BorderRadius.circular(avatarSize * 0.25),
+          boxShadow: [
+            BoxShadow(
+              color: frame.gradientColors.first.withValues(alpha: 0.5),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Icon(
+            frame.iconData ?? Icons.star,
+            color: Colors.white,
+            size: avatarSize * 0.5,
+          ),
+        ),
+      );
+    }
+
+    // No frame - show country flag
+    return Container(
+      width: avatarSize,
+      height: avatarSize,
+      decoration: BoxDecoration(
+        color: theme.card,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: theme.buttonText.withValues(alpha: 0.3),
+          width: 2,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          _currentUser!.countryFlag,
+          style: TextStyle(fontSize: _getResponsiveFontSize(22)),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCurrentUserCard(AppThemeColors theme, AppLocalizations l10n) {
     if (_currentUser == null) return const SizedBox.shrink();
 
@@ -562,22 +699,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
               ),
             ),
             SizedBox(width: isTablet ? 14.w : 12.w),
-            Container(
-              width: avatarSize,
-              height: avatarSize,
-              decoration: BoxDecoration(
-                color: theme.card,
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: theme.buttonText.withValues(alpha: 0.3), width: 2),
-              ),
-              child: Center(
-                child: Text(
-                  _currentUser!.countryFlag,
-                  style: TextStyle(fontSize: _getResponsiveFontSize(22)),
-                ),
-              ),
-            ),
+            _buildCurrentUserAvatar(theme, avatarSize),
             SizedBox(width: isTablet ? 14.w : 12.w),
             Expanded(
               child: Column(
@@ -611,17 +733,32 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
                     ],
                   ),
                   SizedBox(height: 2.w),
-                  Text(
-                    currentTabIndex == 0
-                        ? '${l10n.level} ${_currentUser!.level} • ${_formatNumber(_currentUser!.totalXp)} XP'
-                        : '${_currentUser!.division ?? 'Bronze'} • ${_formatNumber(_currentUser!.rankedPoints)} RP',
-                    style: TextStyle(
-                      fontSize: _getResponsiveFontSize(12),
-                      color: theme.buttonText.withValues(alpha: 0.9),
-                      letterSpacing: 0.15,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  currentTabIndex == 0
+                      ? Text(
+                          '${l10n.level} ${_currentUser!.level} • ${_formatNumber(_currentUser!.totalXp)} XP',
+                          style: TextStyle(
+                            fontSize: _getResponsiveFontSize(12),
+                            color: theme.buttonText.withValues(alpha: 0.9),
+                            letterSpacing: 0.15,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DivisionBadge(rank: _currentUser!.division ?? 'Bronze', size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${_currentUser!.division ?? 'Bronze'} • ${_formatNumber(_currentUser!.rankedPoints)} RP',
+                              style: TextStyle(
+                                fontSize: _getResponsiveFontSize(12),
+                                color: theme.buttonText.withValues(alpha: 0.9),
+                                letterSpacing: 0.15,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                 ],
               ),
             ),
@@ -646,7 +783,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
   }
 
   void _openUserProfile(LeaderboardUser user) {
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
     Navigator.push(
       context,
       MaterialPageRoute(

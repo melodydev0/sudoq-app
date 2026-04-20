@@ -1,16 +1,23 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'level_service.dart';
 import 'storage_service.dart';
 import 'achievement_service.dart';
 import 'local_duel_stats_service.dart';
+import 'daily_challenge_service.dart';
+import '../models/statistics.dart';
 
 /// Service for syncing local data with Firestore
 /// Local-first approach: data is always saved locally, then synced to cloud
 class UserSyncService {
-  static final _firestore = FirebaseFirestore.instance;
-  static final _auth = FirebaseAuth.instance;
+  static FirebaseFirestore? _firestoreInstance;
+  static FirebaseFirestore get _firestore =>
+      _firestoreInstance ??= FirebaseFirestore.instance;
+  static FirebaseAuth? _authInstance;
+  static FirebaseAuth get _auth => _authInstance ??= FirebaseAuth.instance;
 
   static const String _lastSyncKey = 'last_cloud_sync';
   static const String _pendingSyncKey = 'pending_cloud_sync';
@@ -51,9 +58,9 @@ class UserSyncService {
           'achievements': _exportAchievementData(),
           'duel': LocalDuelStatsService.exportForCloud(),
           'statistics': _exportStatistics(),
+          'daily': _exportDailyData(),
         },
         'settings': _exportSettings(),
-        'isAdsFree': StorageService.isAdsFree(),
         'syncedAt': FieldValue.serverTimestamp(),
       };
 
@@ -70,7 +77,7 @@ class UserSyncService {
 
       return true;
     } catch (e) {
-      print('Sync to cloud failed: $e');
+      debugPrint('Sync to cloud failed: $e');
       return false;
     }
   }
@@ -109,7 +116,7 @@ class UserSyncService {
 
       return true;
     } catch (e) {
-      print('Sync from cloud failed: $e');
+      debugPrint('Sync from cloud failed: $e');
       return false;
     }
   }
@@ -125,8 +132,6 @@ class UserSyncService {
           await _importLevelData(stats['level'] as Map<String, dynamic>);
         }
 
-        // Note: Ranked data removed - now using LocalDuelStatsService for duel stats
-
         // Import achievement data
         if (stats['achievements'] != null) {
           await _importAchievementData(
@@ -138,23 +143,28 @@ class UserSyncService {
           await LocalDuelStatsService.importFromCloud(
               stats['duel'] as Map<String, dynamic>);
         }
+
+        // Import game statistics
+        if (stats['statistics'] != null) {
+          await _importStatistics(stats['statistics'] as Map<String, dynamic>);
+        }
+
+        // Import daily challenge data
+        if (stats['daily'] != null) {
+          await _importDailyData(stats['daily'] as Map<String, dynamic>);
+        }
       }
 
-      // Import settings
+      // Import settings (full)
       if (data['settings'] != null) {
         await _importSettings(data['settings'] as Map<String, dynamic>);
-      }
-
-      // Import market/entitlements (premium status)
-      if (data['isAdsFree'] != null) {
-        await StorageService.setAdsFree(data['isAdsFree'] as bool);
       }
 
       // Update local sync time
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_lastSyncKey, DateTime.now().toIso8601String());
     } catch (e) {
-      print('Import from cloud failed: $e');
+      debugPrint('Import from cloud failed: $e');
     }
   }
 
@@ -196,6 +206,7 @@ class UserSyncService {
         'photoUrl': _auth.currentUser?.photoURL,
         'level': levelData.level,
         'totalXp': levelData.totalXp,
+        'selectedFrame': LevelService.selectedFrameId,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -209,10 +220,57 @@ class UserSyncService {
         'wins': duelStats['wins'] ?? 0,
         'losses': duelStats['losses'] ?? 0,
         'winRate': duelStats['winRate'] ?? 0.0,
+        'selectedFrame': LevelService.selectedFrameId,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
-      print('Update leaderboard failed: $e');
+      debugPrint('Update leaderboard failed: $e');
+    }
+  }
+
+  /// Update display name in all leaderboards
+  static Future<void> updateDisplayName(String displayName) async {
+    if (!isLoggedIn) return;
+    
+    final uid = currentUserId!;
+    
+    try {
+      // Update level leaderboard
+      await _firestore.collection('leaderboard').doc(uid).set({
+        'displayName': displayName,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Update duel leaderboard
+      await _firestore.collection('duel_leaderboard').doc(uid).set({
+        'displayName': displayName,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Update display name failed: $e');
+    }
+  }
+
+  /// Update country code in all leaderboards
+  static Future<void> updateCountryCode(String countryCode) async {
+    if (!isLoggedIn) return;
+    
+    final uid = currentUserId!;
+    
+    try {
+      // Update level leaderboard
+      await _firestore.collection('leaderboard').doc(uid).set({
+        'countryCode': countryCode,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Update duel leaderboard
+      await _firestore.collection('duel_leaderboard').doc(uid).set({
+        'countryCode': countryCode,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Update country code failed: $e');
     }
   }
 
@@ -255,7 +313,7 @@ class UserSyncService {
       }
       return results;
     } catch (e) {
-      print('Get leaderboard failed: $e');
+      debugPrint('Get leaderboard failed: $e');
       return [];
     }
   }
@@ -297,7 +355,7 @@ class UserSyncService {
 
       return (higherCount.count ?? 0) + 1;
     } catch (e) {
-      print('Get user rank failed: $e');
+      debugPrint('Get user rank failed: $e');
       return null;
     }
   }
@@ -336,33 +394,43 @@ class UserSyncService {
     return stats.toJson();
   }
 
+  static Map<String, dynamic> _exportDailyData() {
+    final data = DailyChallengeService.data;
+    return {
+      'currentStreak': data.currentStreak,
+      'bestStreak': data.bestStreak,
+      'totalDaysCompleted': data.totalDaysCompleted,
+      'earnedBadgesCount': data.earnedBadges.where((b) => b.isComplete).length,
+      // Full data stored as json string for cross-device restore
+      'fullData': jsonEncode(data.toJson()),
+    };
+  }
+
   static Map<String, dynamic> _exportSettings() {
     final settings = StorageService.getSettings();
     return {
       ...settings.toJson(),
       'soundEnabled': StorageService.getSoundEnabled(),
+      'pushNotificationsEnabled': StorageService.getPushNotificationsEnabled(),
     };
   }
 
   // ==================== IMPORT HELPERS ====================
 
   static Future<void> _importLevelData(Map<String, dynamic> data) async {
-    // Use LevelService's import method
-    final jsonStr = '''
-    {
-      "levelData": {
-        "totalXp": ${data['totalXp'] ?? 0},
-        "seasonXp": ${data['seasonXp'] ?? 0},
-        "seasonNumber": ${data['seasonNumber'] ?? 1},
-        "streakDays": ${data['streakDays'] ?? 0},
-        "unlockedRewards": ${data['unlockedRewards'] ?? []}
+    final payload = <String, dynamic>{
+      'levelData': {
+        'totalXp': data['totalXp'] ?? 0,
+        'seasonXp': data['seasonXp'] ?? 0,
+        'seasonNumber': data['seasonNumber'] ?? 1,
+        'streakDays': data['streakDays'] ?? 0,
+        'unlockedRewards': data['unlockedRewards'] ?? <dynamic>[],
       },
-      "selectedTheme": "${data['selectedTheme'] ?? 'theme_default'}",
-      "selectedFrame": "${data['selectedFrame'] ?? 'frame_basic'}",
-      "selectedEffect": "${data['selectedEffect'] ?? 'effect_sparkle'}"
-    }
-    ''';
-    await LevelService.importData(jsonStr);
+      'selectedTheme': data['selectedTheme'] ?? 'theme_default',
+      'selectedFrame': data['selectedFrame'] ?? 'frame_basic',
+      'selectedEffect': data['selectedEffect'] ?? 'effect_sparkle',
+    };
+    await LevelService.importData(jsonEncode(payload));
   }
 
   static Future<void> _importAchievementData(Map<String, dynamic> data) async {
@@ -375,13 +443,180 @@ class UserSyncService {
     }
   }
 
+  static Future<void> _importStatistics(Map<String, dynamic> data) async {
+    try {
+      if (data.isEmpty) return;
+      final current = StorageService.getStatistics();
+      final cloudWins = data['totalGamesWon'] as int? ?? 0;
+      if (cloudWins > current.totalGamesWon) {
+        // Cloud has more wins — import cloud statistics
+        final imported = Statistics.fromJson(data);
+        await StorageService.saveStatistics(imported);
+      }
+    } catch (e) {
+      debugPrint('Import statistics failed: $e');
+    }
+  }
+
+  static Future<void> _importDailyData(Map<String, dynamic> data) async {
+    try {
+      final fullDataJson = data['fullData'] as String?;
+      if (fullDataJson == null || fullDataJson.isEmpty) return;
+      final parsed = jsonDecode(fullDataJson) as Map<String, dynamic>;
+      final cloudTotal = parsed['totalDaysCompleted'] as int? ?? 0;
+      final localTotal = DailyChallengeService.totalDaysCompleted;
+      if (cloudTotal > localTotal) {
+        await DailyChallengeService.importFromJson(parsed);
+      }
+    } catch (e) {
+      debugPrint('Import daily data failed: $e');
+    }
+  }
+
   static Future<void> _importSettings(Map<String, dynamic> data) async {
-    if (data['soundEnabled'] != null) {
-      await StorageService.setSoundEnabled(data['soundEnabled'] as bool);
+    try {
+      if (data['soundEnabled'] != null) {
+        await StorageService.setSoundEnabled(data['soundEnabled'] as bool);
+      }
+      if (data['pushNotificationsEnabled'] != null) {
+        await StorageService.setPushNotificationsEnabled(
+            data['pushNotificationsEnabled'] as bool);
+      }
+      // Import full AppSettings (language, autoRemoveNotes, vibration, etc.)
+      final settingsFields = {
+        'isDarkMode', 'soundEnabled', 'vibrationEnabled', 'autoRemoveNotes',
+        'highlightSameNumbers', 'highlightRowColumn', 'showMistakes',
+        'showTimer', 'showRemainingNumbers', 'defaultDifficulty', 'languageCode',
+      };
+      final hasAnyField = settingsFields.any((k) => data.containsKey(k));
+      if (hasAnyField) {
+        final currentSettings = StorageService.getSettings();
+        final merged = currentSettings.copyWith(
+          isDarkMode: data['isDarkMode'] as bool? ?? currentSettings.isDarkMode,
+          soundEnabled: data['soundEnabled'] as bool? ?? currentSettings.soundEnabled,
+          vibrationEnabled: data['vibrationEnabled'] as bool? ?? currentSettings.vibrationEnabled,
+          autoRemoveNotes: data['autoRemoveNotes'] as bool? ?? currentSettings.autoRemoveNotes,
+          highlightSameNumbers: data['highlightSameNumbers'] as bool? ?? currentSettings.highlightSameNumbers,
+          highlightRowColumn: data['highlightRowColumn'] as bool? ?? currentSettings.highlightRowColumn,
+          showMistakes: data['showMistakes'] as bool? ?? currentSettings.showMistakes,
+          showTimer: data['showTimer'] as bool? ?? currentSettings.showTimer,
+          showRemainingNumbers: data['showRemainingNumbers'] as bool? ?? currentSettings.showRemainingNumbers,
+          defaultDifficulty: data['defaultDifficulty'] as String? ?? currentSettings.defaultDifficulty,
+          languageCode: data['languageCode'] as String? ?? currentSettings.languageCode,
+        );
+        await StorageService.saveSettings(merged);
+      }
+    } catch (e) {
+      debugPrint('Import settings failed: $e');
     }
   }
 
   // ==================== USER PROFILE ====================
+
+  /// Export a snapshot of ALL local data for cross-device merge
+  /// (called before switching from anonymous to an existing account)
+  static Map<String, dynamic> exportLocalForMerge() {
+    return {
+      'level': _exportLevelData(),
+      'achievements': _exportAchievementData(),
+      'duel': LocalDuelStatsService.exportForCloud(),
+      'statistics': _exportStatistics(),
+      'daily': _exportDailyData(),
+    };
+  }
+
+  /// Merge anonymous local snapshot into the current (Google/Apple) cloud account.
+  /// Always keeps the HIGHER value for numeric progress fields.
+  static Future<void> mergeLocalIntoCloud(
+      Map<String, dynamic> localSnapshot) async {
+    if (!isLoggedIn || isAnonymous) return;
+
+    try {
+      final uid = currentUserId!;
+      final userRef = _firestore.collection('users').doc(uid);
+      final cloudDoc = await userRef.get();
+      final cloudData = cloudDoc.data() ?? {};
+      final cloudStats = cloudData['stats'] as Map<String, dynamic>? ?? {};
+
+      // --- Level: keep higher totalXp ---
+      final localLevel = localSnapshot['level'] as Map<String, dynamic>? ?? {};
+      final cloudLevel = cloudStats['level'] as Map<String, dynamic>? ?? {};
+      final localXp = localLevel['totalXp'] as int? ?? 0;
+      final cloudXp = cloudLevel['totalXp'] as int? ?? 0;
+      final mergedLevel = localXp > cloudXp ? localLevel : cloudLevel;
+
+      // Merge unlockedRewards (union of both)
+      final localRewards = Set<String>.from(
+          (localLevel['unlockedRewards'] as List<dynamic>? ?? []).map((e) => e.toString()));
+      final cloudRewards = Set<String>.from(
+          (cloudLevel['unlockedRewards'] as List<dynamic>? ?? []).map((e) => e.toString()));
+      mergedLevel['unlockedRewards'] = localRewards.union(cloudRewards).toList();
+
+      // --- Duel: keep higher wins+losses total (more games played) ---
+      final localDuel = localSnapshot['duel'] as Map<String, dynamic>? ?? {};
+      final cloudDuel = cloudStats['duel'] as Map<String, dynamic>? ?? {};
+      final localGames = (localDuel['wins'] as int? ?? 0) + (localDuel['losses'] as int? ?? 0);
+      final cloudGames = (cloudDuel['wins'] as int? ?? 0) + (cloudDuel['losses'] as int? ?? 0);
+      final mergedDuel = localGames > cloudGames ? localDuel : cloudDuel;
+      // Always keep higher ELO
+      final localElo = localDuel['elo'] as int? ?? 450;
+      final cloudElo = cloudDuel['elo'] as int? ?? 450;
+      mergedDuel['elo'] = localElo > cloudElo ? localElo : cloudElo;
+
+      // --- Achievements: union ---
+      final localAch = localSnapshot['achievements'] as Map<String, dynamic>? ?? {};
+      final cloudAch = cloudStats['achievements'] as Map<String, dynamic>? ?? {};
+      final localUnlocked = Set<String>.from(
+          (localAch['unlockedAchievements'] as List<dynamic>? ?? []).map((e) => e.toString()));
+      final cloudUnlocked = Set<String>.from(
+          (cloudAch['unlockedAchievements'] as List<dynamic>? ?? []).map((e) => e.toString()));
+      final mergedAch = {
+        ...cloudAch,
+        'unlockedAchievements': localUnlocked.union(cloudUnlocked).toList(),
+      };
+
+      // --- Statistics: keep higher totalGamesWon ---
+      final localStats = localSnapshot['statistics'] as Map<String, dynamic>? ?? {};
+      final cloudStatsMap = cloudStats['statistics'] as Map<String, dynamic>? ?? {};
+      final localWins = localStats['totalGamesWon'] as int? ?? 0;
+      final cloudWins = cloudStatsMap['totalGamesWon'] as int? ?? 0;
+      final mergedStats = localWins > cloudWins ? localStats : cloudStatsMap;
+
+      // --- Daily: keep higher totalDaysCompleted ---
+      final localDaily = localSnapshot['daily'] as Map<String, dynamic>? ?? {};
+      final cloudDaily = cloudStats['daily'] as Map<String, dynamic>? ?? {};
+      final localDays = localDaily['totalDaysCompleted'] as int? ?? 0;
+      final cloudDays = cloudDaily['totalDaysCompleted'] as int? ?? 0;
+      final mergedDaily = localDays > cloudDays ? localDaily : cloudDaily;
+
+      await userRef.set({
+        'stats': {
+          'level': mergedLevel,
+          'achievements': mergedAch,
+          'duel': mergedDuel,
+          'statistics': mergedStats,
+          'daily': mergedDaily,
+        },
+        'syncedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Import merged data back to local
+      await _importFromCloud({
+        'stats': {
+          'level': mergedLevel,
+          'achievements': mergedAch,
+          'duel': mergedDuel,
+          'statistics': mergedStats,
+          'daily': mergedDaily,
+        },
+      });
+
+      await _updateLeaderboard(uid);
+      debugPrint('Merged anonymous data into cloud account: $uid');
+    } catch (e) {
+      debugPrint('mergeLocalIntoCloud failed: $e');
+    }
+  }
 
   /// Create initial profile for new user
   static Future<void> createUserProfile() async {
@@ -394,7 +629,7 @@ class UserSyncService {
       'profile': {
         'displayName': user.displayName ?? 'Player',
         'email': user.email,
-        'photoURL': user.photoURL,
+        'photoUrl': user.photoURL,
         'createdAt': FieldValue.serverTimestamp(),
         'lastSeen': FieldValue.serverTimestamp(),
       },
@@ -412,5 +647,8 @@ class UserSyncService {
 
     // Delete leaderboard entry
     await _firestore.collection('leaderboard').doc(uid).delete();
+
+    // Delete duel leaderboard entry
+    await _firestore.collection('duel_leaderboard').doc(uid).delete();
   }
 }

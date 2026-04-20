@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/models/battle_models.dart';
@@ -10,7 +10,10 @@ import '../../../../core/services/sound_service.dart';
 import '../../../../core/services/achievement_service.dart';
 import '../../../../core/services/level_service.dart';
 import '../../../../core/theme/app_theme_manager.dart';
+import '../../../../core/utils/lottie_loader.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/widgets/user_avatar_with_frame.dart';
+import '../../../../core/widgets/division_badge.dart';
 import '../../../home/presentation/screens/home_screen.dart';
 import '../widgets/rank_up_celebration_overlay.dart';
 
@@ -20,6 +23,11 @@ class BattleResultScreen extends StatefulWidget {
   final int mistakes;
   final String? forcedResult; // 'win' or 'lose' for test battles
   final int? eloChange; // ELO change based on AI difficulty
+  // Pre-calculated ELO values to avoid race condition with recordWin/recordLoss
+  final int? startElo;
+  final int? newElo;
+  final String? rankUpFrom;
+  final String? rankUpTo;
 
   const BattleResultScreen({
     super.key,
@@ -28,6 +36,10 @@ class BattleResultScreen extends StatefulWidget {
     required this.mistakes,
     this.forcedResult,
     this.eloChange,
+    this.startElo,
+    this.newElo,
+    this.rankUpFrom,
+    this.rankUpTo,
   });
 
   @override
@@ -43,8 +55,7 @@ class _BattleResultScreenState extends State<BattleResultScreen>
   int _newElo = 800;
   int _startElo = 800; // ELO before the match
   int _displayedElo = 800; // Animated ELO display
-  String _rankName = 'Bronze'; // English rank for l10n
-  String _rankEmoji = '🥉';
+  String _rankName = 'Bronze';
   int _earnedXp = 0;
   bool _showRankUpCelebration = false;
   String? _rankUpFrom;
@@ -130,43 +141,63 @@ class _BattleResultScreenState extends State<BattleResultScreen>
         won = battle?.winnerId == battle?.player1?.oderId;
       }
 
-      // Use actual ELO change from AI difficulty (passed from game screen)
-      // Stats are already recorded in battle_game_screen, just display here
-      _eloChange = widget.eloChange ?? (won ? 25 : 20);
-      _newElo = LocalDuelStatsService.elo;
-      // Calculate start ELO (before the match)
-      _startElo = won ? (_newElo - _eloChange) : (_newElo + _eloChange);
+      _eloChange = widget.eloChange ??
+          LocalDuelStatsService.pendingEloChange ??
+          (won ? 25 : 20);
+
+      // Use pre-calculated ELO values if passed (avoids race condition with
+      // recordWin/recordLoss running in a microtask after navigation).
+      if (widget.newElo != null && widget.startElo != null) {
+        _newElo = widget.newElo!;
+        _startElo = widget.startElo!;
+      } else {
+        _newElo = LocalDuelStatsService.elo;
+        _startElo = won ? (_newElo - _eloChange) : (_newElo + _eloChange);
+      }
       _displayedElo = _startElo;
-      _rankName = LocalDuelStatsService.rank;
-      _rankEmoji = LocalDuelStatsService.getRankEmoji(_rankName);
+      _rankName = LocalDuelStatsService.getRankFromElo(_newElo);
     } else {
       // For real battles, fetch from Firestore
       battle = await BattleService.getBattle(widget.battleId);
-      if (battle == null || !mounted) return;
+      if (battle == null || !mounted) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
 
       final oderId = AuthService.userId;
       won = battle.winnerId == oderId;
 
-      // Calculate ELO change
-      final myPlayer = battle.getSelf(oderId ?? '');
-      final opponent = battle.getOpponent(oderId ?? '');
+      // ELO was already calculated & saved in BattleService._updatePlayerStats.
+      // Use the actual recorded change from LocalDuelStatsService for consistency.
+      _newElo = LocalDuelStatsService.elo;
+      _rankName = LocalDuelStatsService.rank;
 
-      if (myPlayer != null && opponent != null) {
-        final profile = await AuthService.getUserProfile();
-        final gamesPlayed = profile?['battleStats']?['gamesPlayed'] ?? 0;
-
-        _eloChange = EloCalculator.calculateEloChange(
-          playerElo: myPlayer.elo,
-          opponentElo: opponent.elo,
-          won: won,
-          gamesPlayed: gamesPlayed,
-        );
-
-        _startElo = myPlayer.elo;
-        _newElo = myPlayer.elo + _eloChange;
+      final actualPendingChange = LocalDuelStatsService.pendingEloChange;
+      if (actualPendingChange != null && actualPendingChange > 0) {
+        _eloChange = actualPendingChange;
+        _startElo = won ? (_newElo - _eloChange) : (_newElo + _eloChange);
         _displayedElo = _startElo;
-        _rankName = AuthService.getRankDisplay(_newElo);
-        _rankEmoji = AuthService.getRankEmoji(_rankName);
+      } else {
+        // Fallback: recalculate from battle data
+        final myPlayer = battle.getSelf(oderId ?? '');
+        final opponent = battle.getOpponent(oderId ?? '');
+
+        if (myPlayer != null && opponent != null) {
+          _eloChange = EloCalculator.calculateEloChange(
+            playerElo: myPlayer.elo,
+            opponentElo: opponent.elo,
+            won: won,
+            gamesPlayed: LocalDuelStatsService.totalGames,
+            multiplier: 2.0,
+          ).abs();
+
+          _startElo = won ? (_newElo - _eloChange) : (_newElo + _eloChange);
+          _displayedElo = _startElo;
+        } else {
+          _startElo = _newElo;
+          _eloChange = 0;
+          _displayedElo = _newElo;
+        }
       }
     }
 
@@ -197,7 +228,11 @@ class _BattleResultScreenState extends State<BattleResultScreen>
     String? rankUpFrom;
     String? rankUpTo;
     if (won) {
-      if (isTestBattle) {
+      if (widget.rankUpFrom != null && widget.rankUpTo != null) {
+        // Use pre-calculated rank-up info passed from game screen
+        rankUpFrom = widget.rankUpFrom;
+        rankUpTo = widget.rankUpTo;
+      } else if (isTestBattle) {
         rankUpFrom = LocalDuelStatsService.pendingRankUpFrom;
         rankUpTo = LocalDuelStatsService.pendingRankUp;
       } else {
@@ -236,10 +271,20 @@ class _BattleResultScreenState extends State<BattleResultScreen>
     // Play sound in background (non-blocking)
     if (_won) {
       Future.microtask(() => SoundService().playVictory());
-      // Check duel achievements when won
-      Future.microtask(() => AchievementService.checkAfterDuelWin());
+      Future.microtask(() async {
+        try {
+          final achievementResult = await AchievementService.checkAfterDuelWin();
+          if (achievementResult.totalXpBonus > 0) {
+            await LevelService.addBonusXp(achievementResult.totalXpBonus);
+          }
+        } catch (e) {
+          debugPrint('Duel achievement check failed (non-fatal): $e');
+        }
+      });
+    } else {
+      Future.microtask(() => SoundService().playGameLost());
     }
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   @override
@@ -285,38 +330,47 @@ class _BattleResultScreenState extends State<BattleResultScreen>
             child: SafeArea(
               child: Column(
                 children: [
-                  const Spacer(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.only(
+                        top: MediaQuery.of(context).size.height * 0.03,
+                      ),
+                      child: Column(
+                        children: [
+                          // Result badge
+                          FadeTransition(
+                            opacity: _fadeAnimation,
+                            child: ScaleTransition(
+                              scale: _scaleAnimation,
+                              child: _buildResultBadge(theme),
+                            ),
+                          ),
 
-                  // Result badge
-                  FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: ScaleTransition(
-                      scale: _scaleAnimation,
-                      child: _buildResultBadge(theme),
+                          SizedBox(height: 24.w),
+
+                          // VS Display
+                          _buildVsDisplay(theme, opponent),
+
+                          SizedBox(height: 24.w),
+
+                          // Stats
+                          _buildStatsCard(theme),
+
+                          SizedBox(height: 16.w),
+
+                          // ELO change
+                          _buildEloChange(theme),
+
+                          SizedBox(height: 16.w),
+                        ],
+                      ),
                     ),
                   ),
-
-                  const SizedBox(height: 32),
-
-                  // VS Display
-                  _buildVsDisplay(theme, opponent),
-
-                  const SizedBox(height: 32),
-
-                  // Stats
-                  _buildStatsCard(theme),
-
-                  const SizedBox(height: 24),
-
-                  // ELO change
-                  _buildEloChange(theme),
-
-                  const Spacer(),
 
                   // Buttons
                   _buildButtons(theme),
 
-                  const SizedBox(height: 24),
+                  SizedBox(height: MediaQuery.of(context).padding.bottom > 0 ? 8 : 16),
                 ],
               ),
             ),
@@ -344,38 +398,47 @@ class _BattleResultScreenState extends State<BattleResultScreen>
 
   Widget _buildResultBadge(AppThemeColors theme) {
     final accent = _won ? Colors.green : Colors.red;
+    final lottieAsset = _won
+        ? 'assets/lottie/results/victory.json'
+        : 'assets/lottie/results/defeat.json';
+
     return Column(
       children: [
-        Container(
-          width: 128,
-          height: 128,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: accent.withValues(alpha: 0.22),
-            border: Border.all(
-              color: accent,
-              width: 5,
+        LottieLoader.lottieOrFallback(
+          assetPath: lottieAsset,
+          width: 100.w,
+          height: 100.w,
+          fallback: Container(
+            width: 100.w,
+            height: 100.w,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: accent.withValues(alpha: 0.22),
+              border: Border.all(
+                color: accent,
+                width: 5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.35),
+                  blurRadius: 12,
+                  spreadRadius: 0,
+                ),
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.18),
+                  blurRadius: 20,
+                  spreadRadius: 0,
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withValues(alpha: 0.35),
-                blurRadius: 12,
-                spreadRadius: 0,
-              ),
-              BoxShadow(
-                color: accent.withValues(alpha: 0.18),
-                blurRadius: 20,
-                spreadRadius: 0,
-              ),
-            ],
-          ),
-          child: Icon(
-            _won ? Bootstrap.trophy_fill : Bootstrap.x_circle_fill,
-            size: 64,
-            color: _won ? Colors.amber : Colors.red.shade400,
+            child: Icon(
+              _won ? Bootstrap.trophy_fill : Bootstrap.x_circle_fill,
+              size: 50.w,
+              color: _won ? Colors.amber : Colors.red.shade400,
+            ),
           ),
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: 16.w),
         Builder(
           builder: (ctx) {
             final l10n = AppLocalizations.of(ctx);
@@ -398,48 +461,40 @@ class _BattleResultScreenState extends State<BattleResultScreen>
   }
 
   Widget _buildVsDisplay(AppThemeColors theme, BattlePlayer? opponent) {
+    final avatarSize = ResponsiveUtils.isSmallScreen ? 48.0 : 56.w;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      padding: EdgeInsets.symmetric(horizontal: 24.w),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // You
-          Column(
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: _won ? Colors.green : Colors.grey,
-                    width: 3,
+          Flexible(
+            child: Column(
+              children: [
+                UserAvatarWithFrame.currentUser(
+                  size: avatarSize,
+                  showCountryFlag: true,
+                  showAnimation: _won,
+                ),
+                SizedBox(height: 6.w),
+                Builder(
+                  builder: (ctx) => Text(
+                    AppLocalizations.of(ctx).you,
+                    style: TextStyle(
+                      fontSize: 14.sp,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-                child: ClipOval(
-                  child: AuthService.photoUrl != null
-                      ? Image.network(AuthService.photoUrl!, fit: BoxFit.cover)
-                      : const Icon(Icons.person, color: Colors.white),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Builder(
-                builder: (ctx) => Text(
-                  AppLocalizations.of(ctx).you,
-                  style: TextStyle(
-                    fontSize: 14.sp,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              if (_won)
-                const Icon(Bootstrap.check_circle_fill,
-                    color: Colors.green, size: 16),
-            ],
+                if (_won)
+                  const Icon(Bootstrap.check_circle_fill,
+                      color: Colors.green, size: 16),
+              ],
+            ),
           ),
 
-          const SizedBox(width: 32),
+          SizedBox(width: 20.w),
 
           // VS
           Builder(
@@ -453,42 +508,39 @@ class _BattleResultScreenState extends State<BattleResultScreen>
             ),
           ),
 
-          const SizedBox(width: 32),
+          SizedBox(width: 20.w),
 
           // Opponent
-          Column(
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: !_won ? Colors.green : Colors.grey,
-                    width: 3,
+          Flexible(
+            child: Column(
+              children: [
+                UserAvatarWithFrame(
+                  size: avatarSize,
+                  displayName: opponent?.displayName ?? 'Opponent',
+                  photoUrl: opponent?.photoUrl,
+                  frameId: opponent?.equippedFrame,
+                  countryCode: opponent?.countryCode,
+                  avatarAsset: opponent?.avatarAsset,
+                  showCountryFlag: true,
+                  showAnimation: !_won,
+                ),
+                SizedBox(height: 6.w),
+                Builder(
+                  builder: (ctx) => Text(
+                    opponent?.displayName ?? AppLocalizations.of(ctx).opponent,
+                    style: TextStyle(
+                      fontSize: 14.sp,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                child: ClipOval(
-                  child: opponent?.photoUrl != null
-                      ? Image.network(opponent!.photoUrl!, fit: BoxFit.cover)
-                      : const Icon(Icons.person, color: Colors.white),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Builder(
-                builder: (ctx) => Text(
-                  opponent?.displayName ?? AppLocalizations.of(ctx).opponent,
-                  style: TextStyle(
-                    fontSize: 14.sp,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              if (!_won)
-                const Icon(Bootstrap.check_circle_fill,
-                    color: Colors.green, size: 16),
-            ],
+                if (!_won)
+                  const Icon(Bootstrap.check_circle_fill,
+                      color: Colors.green, size: 16),
+              ],
+            ),
           ),
         ],
       ),
@@ -516,23 +568,23 @@ class _BattleResultScreenState extends State<BattleResultScreen>
     final l10n = AppLocalizations.of(context);
     switch (_rankName) {
       case 'Bronze':
-        return '$_rankEmoji ${l10n.bronze}';
+        return l10n.bronze;
       case 'Silver':
-        return '$_rankEmoji ${l10n.silver}';
+        return l10n.silver;
       case 'Gold':
-        return '$_rankEmoji ${l10n.gold}';
+        return l10n.gold;
       case 'Platinum':
-        return '$_rankEmoji ${l10n.platinum}';
+        return l10n.platinum;
       case 'Diamond':
-        return '$_rankEmoji ${l10n.diamond}';
+        return l10n.diamond;
       case 'Master':
-        return '$_rankEmoji ${l10n.master}';
+        return l10n.master;
       case 'Grandmaster':
-        return '$_rankEmoji ${l10n.grandmaster}';
+        return l10n.grandmaster;
       case 'Champion':
-        return '$_rankEmoji ${l10n.champion}';
+        return l10n.champion;
       default:
-        return '$_rankEmoji $_rankName';
+        return _rankName;
     }
   }
 
@@ -541,11 +593,11 @@ class _BattleResultScreenState extends State<BattleResultScreen>
       builder: (context) {
         final l10n = AppLocalizations.of(context);
         return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 32),
-          padding: const EdgeInsets.all(20),
+          margin: EdgeInsets.symmetric(horizontal: 24.w),
+          padding: EdgeInsets.all(16.w),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(16.w),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -595,11 +647,11 @@ class _BattleResultScreenState extends State<BattleResultScreen>
       builder: (context) {
         final l10n = AppLocalizations.of(context);
         return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 32),
-          padding: const EdgeInsets.all(20),
+          margin: EdgeInsets.symmetric(horizontal: 24.w),
+          padding: EdgeInsets.all(16.w),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(16.w),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -639,12 +691,19 @@ class _BattleResultScreenState extends State<BattleResultScreen>
                           ),
                         ],
                       ),
-                      Text(
-                        _localizedRank(context),
-                        style: TextStyle(
-                          fontSize: 14.sp,
-                          color: Colors.amber,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          DivisionBadge(rank: _rankName, size: 22),
+                          const SizedBox(width: 6),
+                          Text(
+                            _localizedRank(context),
+                            style: TextStyle(
+                              fontSize: 14.sp,
+                              color: Colors.amber,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -743,7 +802,7 @@ class _BattleResultScreenState extends State<BattleResultScreen>
 
   Widget _buildButtons(AppThemeColors theme) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      padding: EdgeInsets.symmetric(horizontal: 24.w),
       child: SizedBox(
         width: double.infinity,
         child: ElevatedButton(

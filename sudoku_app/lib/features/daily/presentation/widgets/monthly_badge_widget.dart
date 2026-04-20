@@ -35,32 +35,50 @@ class MonthlyBadgeWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final monthData = _MonthIconData.getForMonth(badgeInfo.month);
 
+    if (monthData.imagePath != null) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Image.asset(
+          monthData.imagePath!,
+          width: size.w,
+          height: size.w,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildIconFallback(monthData);
+          },
+        ),
+      );
+    }
     return GestureDetector(
       onTap: onTap,
-      child: ShaderMask(
-        shaderCallback: (bounds) {
-          if (isLocked) {
-            return LinearGradient(
-              colors: [Colors.grey.shade400, Colors.grey.shade500],
-            ).createShader(bounds);
-          }
+      child: _buildIconFallback(monthData),
+    );
+  }
+
+  Widget _buildIconFallback(_MonthIconData monthData) {
+    return ShaderMask(
+      shaderCallback: (bounds) {
+        if (isLocked) {
           return LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isEarned
-                ? monthData.gradientColors
-                : [
-                    monthData.gradientColors[0].withValues(alpha: 0.5),
-                    monthData.gradientColors[1].withValues(alpha: 0.5),
-                  ],
+            colors: [Colors.grey.shade400, Colors.grey.shade500],
           ).createShader(bounds);
-        },
-        blendMode: BlendMode.srcIn,
-        child: Iconify(
-          isLocked ? GameIcons.padlock : monthData.icon,
-          size: size.w,
-          color: Colors.white, // Will be replaced by shader
-        ),
+        }
+        return LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isEarned
+              ? monthData.gradientColors
+              : [
+                  monthData.gradientColors[0].withValues(alpha: 0.5),
+                  monthData.gradientColors[1].withValues(alpha: 0.5),
+                ],
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.srcIn,
+      child: Iconify(
+        isLocked ? GameIcons.padlock : monthData.icon,
+        size: size.w,
+        color: Colors.white,
       ),
     );
   }
@@ -116,21 +134,18 @@ class LargeBadgeWidget extends StatelessWidget {
             ),
 
             // Main badge - always colorful
-            ShaderMask(
-              shaderCallback: (bounds) {
-                return LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: monthData.gradientColors,
-                ).createShader(bounds);
-              },
-              blendMode: BlendMode.srcIn,
-              child: Iconify(
-                monthData.icon,
-                size: 120.w,
-                color: Colors.white,
-              ),
-            ),
+            if (monthData.imagePath != null)
+              Image.asset(
+                monthData.imagePath!,
+                width: 120.w,
+                height: 120.w,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return _buildIconBadge(monthData);
+                },
+              )
+            else
+              _buildIconBadge(monthData),
 
             // Lock overlay for unearned badges
             if (!isEarned)
@@ -345,6 +360,24 @@ class LargeBadgeWidget extends StatelessWidget {
       ],
     );
   }
+
+  Widget _buildIconBadge(_MonthIconData monthData) {
+    return ShaderMask(
+      shaderCallback: (bounds) {
+        return LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: monthData.gradientColors,
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.srcIn,
+      child: Iconify(
+        monthData.icon,
+        size: 120.w,
+        color: Colors.white,
+      ),
+    );
+  }
 }
 
 /// Month icon data - Professional game icons for each month
@@ -352,86 +385,100 @@ class _MonthIconData {
   final String icon;
   final String name;
   final List<Color> gradientColors;
+  final String? imagePath;
 
   const _MonthIconData({
     required this.icon,
     required this.name,
     required this.gradientColors,
+    this.imagePath,
   });
 
   static _MonthIconData getForMonth(int month) {
     switch (month) {
-      case 1: // January - Frozen/Ice Crystal
+      case 1:
         return const _MonthIconData(
           icon: GameIcons.frozen_orb,
           name: 'Frost Master',
           gradientColors: [Color(0xFF667eea), Color(0xFF764ba2)],
+          imagePath: 'assets/badges/monthly/badge_january.png',
         );
-      case 2: // February - Heart/Love
+      case 2:
         return const _MonthIconData(
           icon: GameIcons.glass_heart,
           name: 'Heart Keeper',
           gradientColors: [Color(0xFFf093fb), Color(0xFFf5576c)],
+          imagePath: 'assets/badges/monthly/badge_february.png',
         );
-      case 3: // March - Sprouting plant
+      case 3:
         return const _MonthIconData(
           icon: GameIcons.vine_flower,
           name: 'Spring Bloom',
           gradientColors: [Color(0xFF11998e), Color(0xFF38ef7d)],
+          imagePath: 'assets/badges/monthly/badge_march.png',
         );
-      case 4: // April - Diamond/Gem
+      case 4:
         return const _MonthIconData(
           icon: GameIcons.cut_diamond,
           name: 'Diamond Soul',
           gradientColors: [Color(0xFF4facfe), Color(0xFF00f2fe)],
+          imagePath: 'assets/badges/monthly/badge_april.png',
         );
-      case 5: // May - Flower
+      case 5:
         return const _MonthIconData(
           icon: GameIcons.lotus_flower,
           name: 'Lotus Warrior',
           gradientColors: [Color(0xFFfa709a), Color(0xFFfee140)],
+          imagePath: 'assets/badges/monthly/badge_may.png',
         );
-      case 6: // June - Sun
+      case 6:
         return const _MonthIconData(
           icon: GameIcons.sun,
           name: 'Sun Champion',
           gradientColors: [Color(0xFFf6d365), Color(0xFFfda085)],
+          imagePath: 'assets/badges/monthly/badge_june.png',
         );
-      case 7: // July - Trophy (Peak Summer)
+      case 7:
         return const _MonthIconData(
           icon: GameIcons.trophy,
           name: 'Summer Legend',
           gradientColors: [Color(0xFFFFD700), Color(0xFFFF8C00)],
+          imagePath: 'assets/badges/monthly/badge_july.png',
         );
-      case 8: // August - Crown
+      case 8:
         return const _MonthIconData(
           icon: GameIcons.crown,
           name: 'Royal Victor',
           gradientColors: [Color(0xFFf5af19), Color(0xFFf12711)],
+          imagePath: 'assets/badges/monthly/badge_august.png',
         );
-      case 9: // September - Falling leaf
+      case 9:
         return const _MonthIconData(
           icon: GameIcons.falling_leaf,
           name: 'Autumn Spirit',
           gradientColors: [Color(0xFFee9ca7), Color(0xFFffdde1)],
+          imagePath: 'assets/badges/monthly/badge_september.png',
         );
-      case 10: // October - Ghost/Halloween
+      case 10:
         return const _MonthIconData(
           icon: GameIcons.spectre,
           name: 'Shadow Hunter',
           gradientColors: [Color(0xFFff9a44), Color(0xFFfc6076)],
+          imagePath: 'assets/badges/monthly/badge_october.png',
         );
-      case 11: // November - Fire/Harvest
+      case 11:
         return const _MonthIconData(
           icon: GameIcons.flame,
           name: 'Fire Keeper',
           gradientColors: [Color(0xFFd299c2), Color(0xFFfef9d7)],
+          imagePath: 'assets/badges/monthly/badge_november.png',
         );
-      case 12: // December - Snowflake/Winter
+      case 12:
         return const _MonthIconData(
           icon: GameIcons.snowflake_1,
           name: 'Winter Hero',
           gradientColors: [Color(0xFF667eea), Color(0xFF764ba2)],
+          imagePath: 'assets/badges/monthly/badge_december.png',
         );
       default:
         return const _MonthIconData(

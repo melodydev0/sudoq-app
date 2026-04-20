@@ -59,8 +59,10 @@ class LevelService {
   /// Get current season
   static Season get currentSeason => Season.getCurrentSeason();
 
-  /// Add XP after completing a game
-  static Future<UserLevelData> addGameXp({
+  /// Add XP after completing a game.
+  /// Returns the new level data AND the daily streak bonus XP granted this game
+  /// (0 if already claimed today or streak is 0).
+  static Future<({UserLevelData levelData, int dailyStreakXp})> addGameXp({
     required String difficulty,
     required Duration completionTime,
     required int mistakes,
@@ -69,12 +71,11 @@ class LevelService {
     int score = 0,
     int maxCombo = 0,
     int fastSolves = 0,
-    double performanceMultiplier =
-        1.0, // Additional multiplier for exceptional performance
+    double performanceMultiplier = 1.0,
   }) async {
     final previousData = levelData;
 
-    // Calculate XP based on performance
+    // Calculate game XP based on performance
     var xp = XpMultipliers.calculateXp(
       difficulty: difficulty,
       completionTime: completionTime,
@@ -87,24 +88,34 @@ class LevelService {
       fastSolves: fastSolves,
     );
 
-    // Apply performance multiplier
     xp = (xp * performanceMultiplier).round();
 
     // Add XP and update streak
     _cachedData = previousData.addXp(xp);
+
+    // Daily streak reward — granted only on the first game of each day
+    int dailyStreakXp = 0;
+    if (_cachedData!.streakDays > 0 &&
+        previousData.isStreakRewardAvailableToday) {
+      dailyStreakXp =
+          XpMultipliers.calculateDailyStreakXp(_cachedData!.streakDays);
+      _cachedData = _cachedData!.copyWith(
+        totalXp: _cachedData!.totalXp + dailyStreakXp,
+        seasonXp: _cachedData!.seasonXp + dailyStreakXp,
+        lastStreakRewardDate: DateTime.now(),
+      );
+    }
 
     // Check for new unlocks
     final previousLevel = previousData.level;
     final newLevel = _cachedData!.level;
 
     if (newLevel > previousLevel) {
-      // Unlock new rewards
       final newUnlocks = <String>[];
       for (int level = previousLevel + 1; level <= newLevel; level++) {
         final rewards = CosmeticRewards.getRewardsForLevel(level);
         newUnlocks.addAll(rewards.map((r) => r.id));
 
-        // Add milestone rewards
         final milestones = LevelMilestones.getRewardsForLevel(level);
         newUnlocks.addAll(milestones);
       }
@@ -117,7 +128,7 @@ class LevelService {
     }
 
     await _saveData();
-    return _cachedData!;
+    return (levelData: _cachedData!, dailyStreakXp: dailyStreakXp);
   }
 
   /// Calculate XP that would be earned (for preview) – same params as addGameXp for accuracy
@@ -274,9 +285,21 @@ class LevelService {
 
   // ========== UTILITY ==========
 
+  /// Add specific reward IDs to the unlocked list (for daily/badge rewards)
+  static Future<void> addUnlockedRewards(List<String> rewardIds) async {
+    if (rewardIds.isEmpty) return;
+    final current = _cachedData ?? UserLevelData();
+    final existing = Set<String>.from(current.unlockedRewards);
+    final newIds = rewardIds.where((id) => !existing.contains(id)).toList();
+    if (newIds.isEmpty) return;
+    _cachedData = current.copyWith(
+      unlockedRewards: [...current.unlockedRewards, ...newIds],
+    );
+    await _saveData();
+  }
+
   /// Check if a reward is unlocked
-  static bool isRewardUnlocked(String rewardId) {
-    final reward = CosmeticRewards.getRewardById(rewardId);
+  static bool isRewardUnlocked(String rewardId) {    final reward = CosmeticRewards.getRewardById(rewardId);
     if (reward == null) return false;
     return reward.isUnlocked(levelData.level, levelData.unlockedRewards);
   }

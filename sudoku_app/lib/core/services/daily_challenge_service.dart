@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/daily_challenge_system.dart';
 import 'global_stats_service.dart';
+import 'level_service.dart';
 
 /// Service for managing daily challenges
 class DailyChallengeService {
@@ -119,6 +120,9 @@ class DailyChallengeService {
 
     // Check for new achievements
     final newAchievements = _checkAchievements(currentData, _cachedData!);
+
+    // Unlock frame/title rewards from achievements and badge
+    await _unlockRewards(newBadge, newAchievements);
 
     return DailyCompletionResult(
       completion: completion,
@@ -269,6 +273,17 @@ class DailyChallengeService {
   /// Get total days completed
   static int get totalDaysCompleted => data.totalDaysCompleted;
 
+  /// Import full daily data from a JSON map (for cross-device sync)
+  static Future<void> importFromJson(Map<String, dynamic> json) async {
+    try {
+      final imported = UserDailyData.fromJson(json);
+      _cachedData = imported;
+      await _saveData();
+    } catch (e) {
+      // Silently ignore malformed data
+    }
+  }
+
   /// Reset all data (for testing)
   static Future<void> reset() async {
     _cachedData = const UserDailyData();
@@ -323,6 +338,35 @@ class DailyChallengeService {
 
   static String _dateKey(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Unlock cosmetic frame/title rewards from badge completions and achievements.
+  /// Adds the reward IDs to LevelService.unlockedRewards so they appear in
+  /// RewardsScreen and can be equipped.
+  static Future<void> _unlockRewards(
+    MonthlyBadge? newBadge,
+    List<DailyAchievementDef> newAchievements,
+  ) async {
+    final toUnlock = <String>[];
+
+    // Frame from monthly badge (e.g. daily_frame_spring)
+    if (newBadge != null) {
+      final badgeInfo = MonthBadgeInfo.getForMonth(newBadge.month);
+      if (badgeInfo.frameRewardId != null) {
+        toUnlock.add(badgeInfo.frameRewardId!);
+      }
+    }
+
+    // Frame/title from daily achievement (e.g. daily_frame_dedicated, badgeMaster)
+    for (final achievement in newAchievements) {
+      if (achievement.frameRewardId != null) {
+        toUnlock.add(achievement.frameRewardId!);
+      }
+    }
+
+    if (toUnlock.isNotEmpty) {
+      await LevelService.addUnlockedRewards(toUnlock);
+    }
   }
 }
 

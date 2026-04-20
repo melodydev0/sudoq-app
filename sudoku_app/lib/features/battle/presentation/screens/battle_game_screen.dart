@@ -1,12 +1,13 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../../../../core/services/haptic_service.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/models/game_state.dart';
 import '../../../../core/models/battle_models.dart';
 import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/ads_service.dart';
 import '../../../../core/services/battle_service.dart';
 import '../../../../core/services/sound_service.dart';
 import '../../../../core/services/user_sync_service.dart';
@@ -17,6 +18,10 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/celebration_effect.dart';
 import '../../../game/presentation/widgets/sudoku_grid.dart';
+import '../../../game/presentation/widgets/game_number_pad.dart';
+import '../../../game/presentation/widgets/auto_complete_button.dart';
+import '../widgets/battle_header.dart';
+import '../widgets/battle_countdown_overlay.dart';
 import 'battle_result_screen.dart';
 
 /// Data class for celebration effects
@@ -67,6 +72,14 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
   // Completed sections tracking (for row/col/box completion effects)
   final List<CompletedSection> _completedSections = [];
   final Set<String> _previouslyCompleted = {};
+
+  // Auto-complete overlay button
+  bool _showAutoCompleteBtn = false;
+  Set<int> _droppingCells = {};
+
+  // Board completion effect (shown after auto-complete before navigating)
+  bool _showBoardCompletion = false;
+  Rect? _boardCompletionRect;
 
   @override
   void initState() {
@@ -246,7 +259,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     for (int i = 3; i >= 1; i--) {
       if (!mounted) return;
       setState(() => _countdown = i);
-      HapticFeedback.mediumImpact();
+      HapticService.mediumImpact();
       await Future.delayed(const Duration(seconds: 1));
     }
 
@@ -276,7 +289,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
       _selectedRow = row;
       _selectedCol = col;
     });
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
   }
 
   void _onNumberSelected(int number) {
@@ -294,7 +307,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
       _setCell(row, col, number);
     }
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   void _setCell(int row, int col, int number) {
@@ -312,12 +325,12 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
 
     if (!isCorrect) {
       newMistakes++;
-      HapticFeedback.heavyImpact();
+      HapticService.heavyImpact();
       SoundService().playWrongInput();
     } else {
       // Play correct input sound
       SoundService().playCorrectInput();
-      HapticFeedback.mediumImpact();
+      HapticService.mediumImpact();
 
       // Trigger celebration effect
       _triggerCelebration(row, col);
@@ -349,8 +362,9 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
       );
     });
 
-    // Update progress
-    _updateProgress();
+    // Update progress — force-write immediately on wrong answer so opponent
+    // sees the updated mistake count without waiting for the throttle window.
+    _updateProgress(forceWrite: !isCorrect);
 
     // Check if 3 mistakes - game over (lose)
     if (newMistakes >= AppConstants.maxMistakes) {
@@ -361,6 +375,8 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     // Check if finished
     if (_checkCompletion(newGrid)) {
       _onGameComplete();
+    } else {
+      _checkAutoComplete();
     }
   }
 
@@ -425,7 +441,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
           index: row,
           completedAt: now,
         ));
-        HapticFeedback.mediumImpact();
+        HapticService.mediumImpact();
         SoundService().playRowComplete();
       }
     }
@@ -440,7 +456,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
           index: col,
           completedAt: now,
         ));
-        HapticFeedback.mediumImpact();
+        HapticService.mediumImpact();
         SoundService().playColumnComplete();
       }
     }
@@ -456,7 +472,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
           index: boxIndex,
           completedAt: now,
         ));
-        HapticFeedback.heavyImpact();
+        HapticService.heavyImpact();
         SoundService().playBoxComplete();
       }
     }
@@ -540,7 +556,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
 
     // Play note sound
     SoundService().playHintFastPencil();
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
 
     setState(() {
       _gameState = _gameState.copyWith(
@@ -572,7 +588,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     }
   }
 
-  void _updateProgress() {
+  void _updateProgress({bool forceWrite = false}) {
     if (_battle == null) return;
 
     // Count total cells to fill (empty cells in original puzzle)
@@ -611,6 +627,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
         correctCells: filledCorrectly,
         totalCells: totalCells,
         mistakes: _gameState.mistakes,
+        forceWrite: forceWrite,
       );
     }
   }
@@ -660,19 +677,142 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     return true;
   }
 
-  void _onGameComplete() async {
+  void _checkAutoComplete() {
+    if (_isFinished) return;
+    int remainingEmpty = 0;
+    for (int r = 0; r < 9; r++) {
+      for (int c = 0; c < 9; c++) {
+        if (_gameState.puzzle[r][c] == 0 &&
+            _gameState.currentGrid[r][c] != _gameState.solution[r][c]) {
+          remainingEmpty++;
+        }
+      }
+    }
+    final shouldShow = remainingEmpty > 0 && remainingEmpty <= 5;
+    if (shouldShow != _showAutoCompleteBtn) {
+      setState(() => _showAutoCompleteBtn = shouldShow);
+    }
+  }
+
+  Future<void> _onAutoComplete() async {
+    if (_isFinished) return;
+
+    // Collect empty cells that need filling
+    final emptyCells = <(int, int)>[];
+    for (int r = 0; r < 9; r++) {
+      for (int c = 0; c < 9; c++) {
+        if (_gameState.puzzle[r][c] == 0 &&
+            _gameState.currentGrid[r][c] == 0) {
+          emptyCells.add((r, c));
+        }
+      }
+    }
+
+    // Capture grid rect before modifying state
+    final gridBox = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    final boardRect = gridBox != null
+        ? (gridBox.localToGlobal(Offset.zero) & gridBox.size)
+        : null;
+
+    setState(() => _showAutoCompleteBtn = false);
+
+    // Play completion sound immediately so user hears it right away
+    SoundService().playGameComplete();
+    HapticService.heavyImpact();
+
+    // Build a mutable working grid
+    final workingGrid =
+        _gameState.currentGrid.map((r) => List<int>.from(r)).toList();
+
+    // Fill cells one-by-one with staggered drop animation
+    const delayPerCell = Duration(milliseconds: 50);
+    for (int i = 0; i < emptyCells.length; i++) {
+      final (r, c) = emptyCells[i];
+      workingGrid[r][c] = _gameState.solution[r][c];
+      final cellKey = r * 9 + c;
+
+      if (!mounted) return;
+      setState(() {
+        _gameState = _gameState.copyWith(
+          currentGrid:
+              workingGrid.map((row) => List<int>.from(row)).toList(),
+        );
+        _droppingCells = {..._droppingCells, cellKey};
+      });
+
+      if (i % 6 == 0) HapticService.lightImpact();
+      await Future.delayed(delayPerCell);
+    }
+
+    // Brief wait for last drop animation then show board completion
+    await Future.delayed(const Duration(milliseconds: 150));
+    if (!mounted) return;
+
+    setState(() {
+      _droppingCells = {};
+      if (boardRect != null) {
+        _boardCompletionRect = boardRect;
+        _showBoardCompletion = true;
+      }
+    });
+
+    if (boardRect == null) _onGameComplete();
+    // Otherwise _onGameComplete is called by BoardCompletionEffect.onComplete
+  }
+
+  Widget _buildAutoCompleteButton(AppLocalizations l10n) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1.0, end: 0.0),
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) => Transform.translate(
+        offset: Offset(80 * value, 0),
+        child: child,
+      ),
+      child: AutoCompleteButton(l10n: l10n, onTap: _onAutoComplete),
+    );
+  }
+
+  void _onGameComplete({bool skipSound = false}) async {
     setState(() => _isFinished = true);
     _timer?.cancel();
     _botTimer?.cancel();
 
-    SoundService().playGameComplete();
-    HapticFeedback.heavyImpact();
+    if (!skipSound) {
+      SoundService().playGameComplete();
+      HapticService.heavyImpact();
+    }
 
     if (_battle?.isTestBattle ?? false) {
       // For test battles, go directly to result
       _navigateToResult(won: true);
     } else {
-      await BattleService.finishBattle(widget.battleId);
+      // For online duels: finishBattle updates Firestore, but the stream guard
+      // (!_isFinished) will already be false for the winner, so _onBattleFinished
+      // never fires. Navigate directly after finishBattle completes.
+      // A timeout prevents a hanging network call from blocking navigation forever.
+      try {
+        await BattleService.finishBattle(widget.battleId)
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        // Even if finishBattle fails/times out, still navigate to show result
+      }
+      if (mounted) {
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => BattleResultScreen(
+                  battleId: widget.battleId,
+                  completionTime: _elapsedTime,
+                  mistakes: _gameState.mistakes,
+                ),
+              ),
+            );
+          }
+        });
+      }
     }
   }
 
@@ -681,8 +821,8 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     _timer?.cancel();
     _botTimer?.cancel();
 
-    HapticFeedback.heavyImpact();
-    SoundService().playWrongInput(); // Loss sound
+    HapticService.heavyImpact();
+    SoundService().playGameLost(); // Loss sound
 
     // Show bot wins dialog
     final l10n = AppLocalizations.of(context);
@@ -715,7 +855,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
           ],
         ),
         content: Text(
-          'The Master Bot completed the puzzle before you! Try again or choose an easier difficulty.',
+          l10n.botWinsMessage,
           style: TextStyle(
             color: theme.textSecondary,
             letterSpacing: 0.2,
@@ -747,7 +887,15 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     _timer?.cancel();
     _botTimer?.cancel();
 
-    HapticFeedback.heavyImpact();
+    HapticService.heavyImpact();
+    SoundService().playGameLost();
+
+    // For online battles: immediately notify opponent and set winner in Firestore
+    // so the opponent's stream sees status=finished and navigates to the result screen.
+    // Fire-and-forget so the dialog appears without delay.
+    if (!(_battle?.isTestBattle ?? true)) {
+      BattleService.resignBattle(widget.battleId);
+    }
 
     final l10n = AppLocalizations.of(context);
     final theme = AppThemeManager.colors;
@@ -780,7 +928,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
           ],
         ),
         content: Text(
-          'You made 3 mistakes! Your opponent wins this match.',
+          l10n.youMade3MistakesOpponentWins,
           style: TextStyle(
             color: theme.textSecondary,
             letterSpacing: 0.2,
@@ -820,7 +968,19 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     // Calculate ELO change to show
     final eloChangeToShow = won ? eloWin : eloLoss;
 
-    // Navigate immediately for better UX
+    // Pre-calculate ELO endpoints to avoid race condition with the microtask
+    // that persists to SharedPreferences after navigation.
+    final currentElo = LocalDuelStatsService.elo;
+    final calculatedNewElo = won
+        ? currentElo + eloChangeToShow
+        : (currentElo - eloChangeToShow).clamp(0, 9999);
+
+    // Detect rank-up now while we still have the old ELO value
+    final oldRank = LocalDuelStatsService.getRankFromElo(currentElo);
+    final newRank = LocalDuelStatsService.getRankFromElo(calculatedNewElo);
+    final rankUpFrom = (won && oldRank != newRank) ? oldRank : null;
+    final rankUpTo = (won && oldRank != newRank) ? newRank : null;
+
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -830,6 +990,10 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
           mistakes: _gameState.mistakes,
           forcedResult: won ? 'win' : 'lose',
           eloChange: eloChangeToShow,
+          startElo: currentElo,
+          newElo: calculatedNewElo,
+          rankUpFrom: rankUpFrom,
+          rankUpTo: rankUpTo,
         ),
       ),
     );
@@ -849,6 +1013,10 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
   void _onBattleFinished() {
     setState(() => _isFinished = true);
     _timer?.cancel();
+
+    // Update this player's stats (they are the loser — the winner's stats are
+    // already updated on the winner's device inside _checkBattleEnd).
+    BattleService.updateMyBattleStats(widget.battleId);
 
     // Navigate to result screen
     Future.delayed(const Duration(milliseconds: 500), () {
@@ -884,7 +1052,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
       _gameState = _gameState.copyWith(currentGrid: newGrid);
     });
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   void _onErase() {
@@ -911,38 +1079,64 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
       );
     });
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   void _showResignDialog() {
     final l10n = AppLocalizations.of(context);
+    final theme = AppThemeManager.colors;
     showDialog(
       context: context,
+      barrierColor: Colors.black54,
+      // Use an explicit fade-only transition. The default Material dialog
+      // transition combines a scale + clip which, together with our rounded
+      // AlertDialog, produces a triangular "folded-corner" artifact on some
+      // Android devices (MIUI / Android 14+). A pure fade avoids that clip
+      // race.
+      useRootNavigator: true,
       builder: (context) => AlertDialog(
+        backgroundColor: theme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            const Icon(Icons.flag, color: Colors.white),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.15),
+                borderRadius: AppTheme.buttonRadius,
+              ),
+              child: const Icon(Icons.flag, color: AppColors.error),
+            ),
             const SizedBox(width: 12),
-            Text(l10n.resignConfirm),
+            Text(
+              l10n.resignConfirm,
+              style: TextStyle(color: theme.textPrimary, fontSize: 18),
+            ),
           ],
         ),
-        content: const Text(
-          'Are you sure you want to resign? Your opponent will win this match.',
+        content: Text(
+          l10n.resignDescription,
+          style: TextStyle(color: theme.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(l10n.cancel),
+            child: Text(l10n.cancel,
+                style: TextStyle(color: theme.textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _resign();
+              // Delay to let dismiss animation finish before navigating
+              Future.delayed(const Duration(milliseconds: 200), () {
+                if (mounted) _resign();
+              });
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: AppColors.error,
               foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(
+                  borderRadius: AppTheme.buttonRadius),
             ),
             child: Text(l10n.resignButton),
           ),
@@ -969,6 +1163,7 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
   Widget build(BuildContext context) {
     ResponsiveUtils.init(context);
     final theme = AppThemeManager.colors;
+    final l10n = AppLocalizations.of(context);
 
     if (_isLoading || _battle == null) {
       return Scaffold(
@@ -977,54 +1172,130 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: theme.background,
-      body: Stack(
-        children: [
-          SafeArea(
-            child: Column(
-              children: [
-                // Header with players info and progress
-                _buildHeader(theme),
+    final isTestBattle = _battle!.isTestBattle;
+    final myBattlePlayer = isTestBattle
+        ? _battle!.player1
+        : _battle!.getSelf(AuthService.userId ?? '');
+    final opponentBattlePlayer = isTestBattle
+        ? _battle!.player2
+        : _battle!.getOpponent(AuthService.userId ?? '');
 
-                // Sudoku grid
-                Expanded(
-                  child: Center(
-                    child: SudokuGrid(
-                      key: _gridKey,
-                      gameState: _gameState,
-                      selectedRow: _selectedRow,
-                      selectedCol: _selectedCol,
-                      onCellTap: _onCellTap,
-                      completedSections: _completedSections,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _showResignDialog();
+      },
+      child: Scaffold(
+        backgroundColor: theme.background,
+        body: Stack(
+          children: [
+            SafeArea(
+              child: Column(
+                children: [
+                  // Header with players info and progress
+                  BattleHeader(
+                    myPlayer: BattlePlayerInfo(
+                      displayName: AuthService.displayName,
+                      photoUrl: AuthService.photoUrl,
+                      equippedFrame: myBattlePlayer?.equippedFrame,
+                      countryCode: myBattlePlayer?.countryCode,
+                      avatarAsset: myBattlePlayer?.avatarAsset,
+                      mistakes: _gameState.mistakes,
+                      progress: myBattlePlayer?.progress ?? 0,
+                    ),
+                    opponent: BattlePlayerInfo(
+                      displayName:
+                          opponentBattlePlayer?.displayName ?? l10n.opponent,
+                      photoUrl: opponentBattlePlayer?.photoUrl,
+                      equippedFrame: opponentBattlePlayer?.equippedFrame,
+                      countryCode: opponentBattlePlayer?.countryCode,
+                      avatarAsset: opponentBattlePlayer?.avatarAsset,
+                      mistakes: opponentBattlePlayer?.mistakes ?? 0,
+                      progress: opponentBattlePlayer?.progress ?? 0,
+                    ),
+                    score: _calculateScore(),
+                    elapsedTime: _elapsedTime,
+                    onResign: _showResignDialog,
+                  ),
+
+                  // Sudoku grid
+                  Expanded(
+                    child: Center(
+                      child: SudokuGrid(
+                        key: _gridKey,
+                        gameState: _gameState,
+                        selectedRow: _selectedRow,
+                        selectedCol: _selectedCol,
+                        onCellTap: _onCellTap,
+                        completedSections: _completedSections,
+                        droppingCells: _droppingCells,
+                      ),
                     ),
                   ),
-                ),
 
-                // Action buttons
-                _buildActionButtons(theme),
+                  // Action buttons
+                  _buildActionButtons(theme),
 
-                // Number pad
-                _buildNumberPad(theme),
+                  // Number pad
+                  GameNumberPad(
+                    isDark: theme.isDark,
+                    cardColor: theme.card,
+                    textColor: theme.textPrimary,
+                    remainingCounts: {
+                      for (var i = 1; i <= 9; i++)
+                        i: _gameState.getRemainingCount(i),
+                    },
+                    onNumberSelected: _onNumberSelected,
+                  ),
 
-                const SizedBox(height: 8),
-              ],
+                  // Banner ad space
+                  Container(
+                    height: 60,
+                    padding: const EdgeInsets.only(top: 4, bottom: 4),
+                    child: AdsService.shouldShowAds()
+                        ? AdsService.getBannerAdWidget()
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
             ),
-          ),
 
-          // Countdown overlay
-          if (_isCountingDown) _buildCountdownOverlay(theme),
+            // Countdown overlay
+            if (_isCountingDown) BattleCountdownOverlay(countdown: _countdown),
 
-          // Celebration effects overlay
-          ..._celebrations.map((celebration) {
-            return CelebrationEffect(
-              key: ValueKey(celebration.id),
-              position: celebration.position,
-              color: AppColors.gradientStart,
-              onComplete: () => _removeCelebration(celebration.id),
-            );
-          }),
-        ],
+            // Celebration effects overlay
+            ..._celebrations.map((celebration) {
+              return CelebrationEffect(
+                key: ValueKey(celebration.id),
+                position: celebration.position,
+                color: AppColors.gradientStart,
+                onComplete: () => _removeCelebration(celebration.id),
+              );
+            }),
+
+            // Auto-complete button overlay
+            if (_showAutoCompleteBtn)
+              Positioned(
+                bottom: 180,
+                right: 16,
+                child: _buildAutoCompleteButton(l10n),
+              ),
+
+            // Board completion sweep effect (after auto-complete, before result)
+            if (_showBoardCompletion && _boardCompletionRect != null)
+              Positioned.fill(
+                child: BoardCompletionEffect(
+                  boardRect: _boardCompletionRect!,
+                  onComplete: () {
+                    if (mounted) {
+                      setState(() => _showBoardCompletion = false);
+                      _onGameComplete(skipSound: true);
+                    }
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1044,291 +1315,8 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
     return correctCells * 100;
   }
 
-  Widget _buildHeader(AppThemeColors theme) {
-    // For test battles: player1 = user, player2 = bot
-    // For real battles: use getSelf/getOpponent
-    final isTestBattle = _battle?.isTestBattle ?? false;
-    final myPlayer = isTestBattle
-        ? _battle?.player1
-        : _battle?.getSelf(AuthService.userId ?? '');
-    final opponent = isTestBattle
-        ? _battle?.player2
-        : _battle?.getOpponent(AuthService.userId ?? '');
-    final myProgress = myPlayer?.progress ?? 0;
-    final opponentProgress = opponent?.progress ?? 0;
-    final myMistakes = _gameState.mistakes;
-    final opponentMistakes = opponent?.mistakes ?? 0;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
-        children: [
-          // Back button row
-          Row(
-            children: [
-              GestureDetector(
-                onTap: _showResignDialog,
-                child: const Icon(Icons.arrow_back, size: 24),
-              ),
-              const Spacer(),
-              // Score
-              Text(
-                'Score: ${_calculateScore()}',
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF3B82F6),
-                ),
-              ),
-              const Spacer(),
-              const SizedBox(width: 24),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          // Players info row
-          Row(
-            children: [
-              // My info (left)
-              Expanded(
-                child: Row(
-                  children: [
-                    // Avatar
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.green, width: 2),
-                      ),
-                      child: ClipOval(
-                        child: AuthService.photoUrl != null
-                            ? Image.network(AuthService.photoUrl!,
-                                fit: BoxFit.cover)
-                            : Icon(Icons.person,
-                                size: 18, color: theme.textSecondary),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            (myPlayer?.displayName ?? 'Player').length > 8
-                                ? '${(myPlayer?.displayName ?? 'Player').substring(0, 8)}...'
-                                : myPlayer?.displayName ?? 'Player',
-                            style: TextStyle(
-                              fontSize: 12.sp,
-                              fontWeight: FontWeight.bold,
-                              color: theme.textPrimary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          // Mistakes as X marks
-                          Row(
-                            children: List.generate(
-                              3,
-                              (i) => Padding(
-                                padding: const EdgeInsets.only(right: 3),
-                                child: Text(
-                                  'X',
-                                  style: TextStyle(
-                                    fontSize: 14.sp,
-                                    color: i < myMistakes
-                                        ? Colors.red
-                                        : Colors.grey.shade300,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // VS and Timer (center)
-              Column(
-                children: [
-                  // VS Logo
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    child: Text(
-                      'VS',
-                      style: TextStyle(
-                        fontSize: 16.sp,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFFEF4444),
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                  // Timer
-                  Text(
-                    _formatTime(_elapsedTime),
-                    style: TextStyle(
-                      fontSize: 12.sp,
-                      fontWeight: FontWeight.w500,
-                      color: theme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-
-              // Opponent info (right)
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            (opponent?.displayName ?? 'Opponent').length > 8
-                                ? '${(opponent?.displayName ?? 'Opponent').substring(0, 8)}...'
-                                : opponent?.displayName ?? 'Opponent',
-                            style: TextStyle(
-                              fontSize: 12.sp,
-                              fontWeight: FontWeight.bold,
-                              color: theme.textPrimary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          // Opponent mistakes as X marks
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: List.generate(
-                              3,
-                              (i) => Padding(
-                                padding: const EdgeInsets.only(left: 3),
-                                child: Text(
-                                  'X',
-                                  style: TextStyle(
-                                    fontSize: 14.sp,
-                                    color: i < opponentMistakes
-                                        ? Colors.red
-                                        : Colors.grey.shade300,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Opponent Avatar
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.red, width: 2),
-                      ),
-                      child: ClipOval(
-                        child: opponent?.photoUrl != null
-                            ? Image.network(opponent!.photoUrl!,
-                                fit: BoxFit.cover)
-                            : Icon(Icons.person,
-                                size: 18, color: theme.textSecondary),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          // Progress bars
-          Row(
-            children: [
-              // My progress (left - green)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '$myProgress',
-                  style: TextStyle(
-                    fontSize: 10.sp,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: myProgress / 100,
-                    backgroundColor: Colors.grey.shade200,
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(Colors.green),
-                    minHeight: 12,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              // VS indicator
-              Text(
-                'VS',
-                style: TextStyle(
-                  fontSize: 12.sp,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade500,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: opponentProgress / 100,
-                    backgroundColor: Colors.grey.shade200,
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(Colors.blue),
-                    minHeight: 12,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              // Opponent progress (right - blue)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '$opponentProgress',
-                  style: TextStyle(
-                    fontSize: 10.sp,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildActionButtons(AppThemeColors theme) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -1336,19 +1324,19 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
         children: [
           _buildActionButton(
             icon: Bootstrap.arrow_counterclockwise,
-            label: 'Undo',
+            label: l10n.undo,
             onTap: _onUndo,
             theme: theme,
           ),
           _buildActionButton(
             icon: Bootstrap.eraser,
-            label: 'Erase',
+            label: l10n.erase,
             onTap: _onErase,
             theme: theme,
           ),
           _buildActionButton(
             icon: Bootstrap.pencil,
-            label: 'Notes',
+            label: l10n.notes,
             onTap: () => setState(() => _isPencilMode = !_isPencilMode),
             theme: theme,
             isActive: _isPencilMode,
@@ -1400,91 +1388,5 @@ class _BattleGameScreenState extends State<BattleGameScreen> {
         ),
       ),
     );
-  }
-
-  Widget _buildNumberPad(AppThemeColors theme) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: List.generate(9, (index) {
-          final number = index + 1;
-          final remaining = _gameState.getRemainingCount(number);
-          final isCompleted = remaining == 0;
-
-          return GestureDetector(
-            onTap: isCompleted ? null : () => _onNumberSelected(number),
-            child: Container(
-              width: 36.w,
-              height: 50.w,
-              decoration: BoxDecoration(
-                color: isCompleted
-                    ? theme.textSecondary.withValues(alpha: 0.2)
-                    : theme.card,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '$number',
-                    style: TextStyle(
-                      fontSize: 20.sp,
-                      fontWeight: FontWeight.bold,
-                      color: isCompleted
-                          ? theme.textSecondary.withValues(alpha: 0.5)
-                          : theme.textPrimary,
-                    ),
-                  ),
-                  if (!isCompleted)
-                    Text(
-                      '$remaining',
-                      style: TextStyle(
-                        fontSize: 9.sp,
-                        color: theme.textSecondary,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildCountdownOverlay(AppThemeColors theme) {
-    return Container(
-      color: Colors.black.withValues(alpha: 0.7),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              _countdown > 0 ? '$_countdown' : 'GO!',
-              style: TextStyle(
-                fontSize: 80.sp,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Get Ready!',
-              style: TextStyle(
-                fontSize: 24.sp,
-                color: Colors.white70,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatTime(Duration duration) {
-    final minutes = duration.inMinutes.toString().padLeft(2, '0');
-    final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
   }
 }

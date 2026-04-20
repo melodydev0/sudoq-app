@@ -1,10 +1,14 @@
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/services/storage_service.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/responsive_utils.dart';
-import '../../../home/presentation/screens/home_screen.dart';
+import '../../../../core/l10n/app_localizations.dart';
+import 'permission_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -30,6 +34,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   late Animation<double> _buttonOpacity;
 
   final List<_AnimatedCell> _gridCells = [];
+  Timer? _startAnimationsTimer;
 
   @override
   void initState() {
@@ -126,7 +131,9 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
 
     // Start animations
-    Future.delayed(const Duration(milliseconds: 200), () {
+    _startAnimationsTimer?.cancel();
+    _startAnimationsTimer = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
       _contentController.forward();
       _gridController.forward();
     });
@@ -155,6 +162,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
   @override
   void dispose() {
+    _startAnimationsTimer?.cancel();
     _backgroundController.dispose();
     _contentController.dispose();
     _buttonController.dispose();
@@ -163,16 +171,13 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   void _onAccept() {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
 
-    // Mark first launch as complete
-    StorageService.setFirstLaunchComplete();
-
-    // Go directly to home screen
+    // PermissionScreen handles setFirstLaunchComplete after permissions
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            const HomeScreen(),
+            const PermissionScreen(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
             opacity: animation,
@@ -192,6 +197,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   @override
   Widget build(BuildContext context) {
     ResponsiveUtils.init(context);
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       body: Stack(
         children: [
@@ -305,7 +311,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                   ],
                                 ).createShader(bounds),
                                 child: Text(
-                                  'Welcome to',
+                                  l10n.welcomeTo,
                                   style: TextStyle(
                                     fontSize: 24.sp,
                                     fontWeight: FontWeight.w400,
@@ -342,7 +348,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
                   const SizedBox(height: 50),
 
-                  // Animated Sudoku Grid
+                  // App Icon
                   AnimatedBuilder(
                     animation:
                         Listenable.merge([_contentController, _gridController]),
@@ -351,7 +357,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         scale: _gridScale.value,
                         child: Transform.rotate(
                           angle: _gridRotation.value,
-                          child: _buildAnimatedGrid(),
+                          child: _buildAppIconDisplay(),
                         ),
                       );
                     },
@@ -383,7 +389,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             child: Column(
                               children: [
                                 Text(
-                                  'To enhance your experience, please review our',
+                                  l10n.pleaseReviewOur,
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontSize: 14.sp,
@@ -396,31 +402,45 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     GestureDetector(
-                                      onTap: () {},
+                                      onTap: () async {
+                                        final url = Uri.parse(AppConstants.termsOfServiceUrl);
+                                        if (await canLaunchUrl(url)) {
+                                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                                        }
+                                      },
                                       child: Text(
-                                        'Terms of Service',
+                                        l10n.termsOfService,
                                         style: TextStyle(
                                           fontSize: 14.sp,
                                           fontWeight: FontWeight.w600,
                                           color: AppColors.gradientStart,
+                                          decoration: TextDecoration.underline,
+                                          decorationColor: AppColors.gradientStart,
                                         ),
                                       ),
                                     ),
                                     Text(
-                                      ' and ',
+                                      ' ${l10n.andText} ',
                                       style: TextStyle(
                                         fontSize: 14.sp,
                                         color: AppColors.textSecondary,
                                       ),
                                     ),
                                     GestureDetector(
-                                      onTap: () {},
+                                      onTap: () async {
+                                        final url = Uri.parse(AppConstants.privacyPolicyUrl);
+                                        if (await canLaunchUrl(url)) {
+                                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                                        }
+                                      },
                                       child: Text(
-                                        'Privacy Policy',
+                                        l10n.privacyPolicy,
                                         style: TextStyle(
                                           fontSize: 14.sp,
                                           fontWeight: FontWeight.w600,
                                           color: AppColors.gradientStart,
+                                          decoration: TextDecoration.underline,
+                                          decorationColor: AppColors.gradientStart,
                                         ),
                                       ),
                                     ),
@@ -447,7 +467,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         scale: _buttonScale.value * pulseScale,
                         child: Opacity(
                           opacity: _buttonOpacity.value,
-                          child: _buildAcceptButton(),
+                          child: _buildAcceptButton(context),
                         ),
                       );
                     },
@@ -459,6 +479,38 @@ class _WelcomeScreenState extends State<WelcomeScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAppIconDisplay() {
+    return Container(
+      width: 220,
+      height: 220,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(40),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.gradientStart.withValues(alpha: 0.15),
+            blurRadius: 40,
+            offset: const Offset(0, 20),
+          ),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.8),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(40),
+        child: Image.asset(
+          'assets/icon/app_icon.png',
+          width: 220,
+          height: 220,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildAnimatedGrid(),
+        ),
       ),
     );
   }
@@ -591,7 +643,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
   }
 
-  Widget _buildAcceptButton() {
+  Widget _buildAcceptButton(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return GestureDetector(
       onTap: _onAccept,
       child: Container(
@@ -625,7 +678,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                'Agree & Continue',
+                l10n.agreeAndContinue,
                 style: TextStyle(
                   fontSize: 18.sp,
                   fontWeight: FontWeight.w700,

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/battle_models.dart';
 import 'auth_service.dart';
+import 'level_service.dart';
 import 'local_duel_stats_service.dart';
 import 'sudoku_generator.dart';
 
@@ -17,7 +19,9 @@ enum ConnectionStatus {
 /// Service for managing online duel battles
 /// Optimized for 100K+ concurrent users
 class BattleService {
-  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static FirebaseFirestore? _firestoreInstance;
+  static FirebaseFirestore get _firestore =>
+      _firestoreInstance ??= FirebaseFirestore.instance;
   static final SudokuGenerator _generator = SudokuGenerator();
 
   // Collections
@@ -38,10 +42,16 @@ class BattleService {
 
   // Connection status
   static ConnectionStatus _connectionStatus = ConnectionStatus.disconnected;
-  static final _connectionStatusController =
+  static StreamController<ConnectionStatus> _connectionStatusController =
       StreamController<ConnectionStatus>.broadcast();
   static Stream<ConnectionStatus> get connectionStatusStream =>
       _connectionStatusController.stream;
+
+  static void _ensureControllerOpen() {
+    if (_connectionStatusController.isClosed) {
+      _connectionStatusController = StreamController<ConnectionStatus>.broadcast();
+    }
+  }
   static ConnectionStatus get connectionStatus => _connectionStatus;
 
   // Reconnection settings
@@ -50,11 +60,17 @@ class BattleService {
   static int _reconnectAttempts = 0;
   static Timer? _reconnectTimer;
 
+  // Cancellation flag for active matchmaking search
+  static bool _matchmakingCancelled = false;
+
   // Timeouts
   static const Duration _matchmakingTimeout = Duration(minutes: 2);
+  static const Duration _matchmakingHeartbeat = Duration(seconds: 12);
+  static const Duration _entryTtl = Duration(minutes: 2);
   // ignore: unused_field - Reserved for future battle timeout feature
   static const Duration _battleTimeout = Duration(minutes: 30);
   static Timer? _matchmakingTimer;
+  static Timer? _matchmakingHeartbeatTimer;
   static Timer? _battleTimer;
 
   /// Get current battle ID
@@ -66,7 +82,9 @@ class BattleService {
   /// Set connection status
   static void _setConnectionStatus(ConnectionStatus status) {
     _connectionStatus = status;
-    _connectionStatusController.add(status);
+    if (!_connectionStatusController.isClosed) {
+      _connectionStatusController.add(status);
+    }
     debugPrint('Connection status: $status');
   }
 
@@ -78,12 +96,38 @@ class BattleService {
     Function(String)? onError,
     Function()? onTimeout,
   }) async {
+    // Auth is normally kicked off at app startup (fire-and-forget anonymous
+    // sign-in in main.dart). But that call can silently fail (no network at
+    // launch, Firebase init race, cold-start timeout), leaving the user
+    // permanently stuck on "Connecting to server…". Re-trigger sign-in here
+    // if needed. `signInAnonymously()` is re-entrancy-safe: it returns the
+    // in-flight future if one is already running.
     if (!AuthService.isSignedIn) {
-      onError?.call('Not signed in');
+      try {
+        await AuthService.signInAnonymously()
+            .timeout(const Duration(seconds: 8));
+      } catch (e) {
+        debugPrint('[BattleService] anonymous sign-in during joinMatchmaking failed: $e');
+      }
+    }
+
+    // Give Firebase a brief moment to propagate the new auth state to the
+    // local user object (authStateChanges is asynchronous).
+    if (!AuthService.isSignedIn) {
+      for (int i = 0; i < 6; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (AuthService.isSignedIn) break;
+      }
+    }
+
+    if (!AuthService.isSignedIn) {
+      onError?.call('Could not connect to server. Please check your internet and try again.');
       return;
     }
 
+    _ensureControllerOpen();
     _setConnectionStatus(ConnectionStatus.connecting);
+    _matchmakingCancelled = false;
 
     final oderId = AuthService.userId!;
 
@@ -93,38 +137,57 @@ class BattleService {
     final division = LocalDuelStatsService.rank;
 
     // If signed in with Google, try to get cloud stats for comparison
+    // Timeout prevents freeze when Firestore is slow/unreachable
     int elo = localElo;
     if (!AuthService.isAnonymous) {
       try {
-        final profile = await AuthService.getUserProfile();
-        final cloudElo = profile?['duelStats']?['elo'] as int? ??
-            profile?['battleStats']?['elo'] as int? ??
-            450;
-        // Use higher of local or cloud (in case of sync issues)
-        elo = localElo > cloudElo ? localElo : cloudElo;
+        final profile = await AuthService.getUserProfile()
+            .timeout(const Duration(seconds: 3), onTimeout: () {
+          debugPrint('getUserProfile timeout - using local ELO');
+          return null;
+        });
+        if (profile != null) {
+          final cloudElo = profile['duelStats']?['elo'] as int? ??
+              profile['battleStats']?['elo'] as int? ??
+              450;
+          elo = localElo > cloudElo ? localElo : cloudElo;
+        }
       } catch (e) {
         debugPrint('Failed to fetch cloud stats, using local: $e');
       }
     }
 
+    final playerCountryCode = AuthService.getCountryCode();
+
     final entry = MatchmakingEntry(
       oderId: oderId,
       displayName: AuthService.displayName,
       photoUrl: AuthService.photoUrl,
+      equippedFrame: LevelService.selectedFrameId,
       elo: elo,
       joinedAt: DateTime.now(),
     );
 
     try {
-      // Add to matchmaking queue with division for optimized queries
+      // Clean up any stale matchmaking entry from a previous session
+      // to avoid Firestore update rule conflicts (e.g. ELO mismatch)
+      try {
+        await _matchmaking.doc(oderId).delete();
+      } catch (_) {}
+
+      // Add queue entry and keep it fresh with heartbeat.
       await _matchmaking.doc(oderId).set({
         ...entry.toMap(),
         'division': division,
+        'countryCode': playerCountryCode,
         'status': 'searching',
+        'lastSeen': FieldValue.serverTimestamp(),
+        'expiresAt': Timestamp.fromDate(DateTime.now().add(_entryTtl)),
       });
       debugPrint('Joined matchmaking queue (ELO: $elo, Division: $division)');
 
       _setConnectionStatus(ConnectionStatus.connected);
+      _startMatchmakingHeartbeat(oderId);
 
       // Start matchmaking timeout
       _matchmakingTimer?.cancel();
@@ -138,18 +201,29 @@ class BattleService {
       _matchmakingSubscription?.cancel();
       _matchmakingSubscription = _matchmaking.doc(oderId).snapshots().listen(
         (doc) async {
+          if (_matchmakingCancelled) return;
           if (!doc.exists) {
-            // We were removed from queue - check if matched
-            _matchmakingTimer?.cancel();
-            final matchedBattleId = await _findMyBattle(oderId);
-            if (matchedBattleId != null) {
-              final battle = await getBattle(matchedBattleId);
-              if (battle != null) {
-                _currentBattleId = matchedBattleId;
-                _currentBattle = battle;
-                onMatchFound?.call(battle);
-              }
-            }
+            // Stale cleanup or manual removal. Timeout handler will surface UX.
+            return;
+          }
+
+          final data = doc.data() as Map<String, dynamic>? ?? {};
+          final status = data['status'] as String? ?? 'searching';
+          if (status != 'matched') return;
+
+          final battleId = data['battleId'] as String?;
+          if (battleId == null || battleId.isEmpty) return;
+
+          _matchmakingTimer?.cancel();
+          _matchmakingHeartbeatTimer?.cancel();
+
+          final battle = await _getBattleWithRetry(battleId);
+          if (battle != null) {
+            _currentBattleId = battleId;
+            _currentBattle = battle;
+            onMatchFound?.call(battle);
+          } else {
+            onError?.call('Matched but battle sync failed. Please retry.');
           }
         },
         onError: (e) {
@@ -157,14 +231,27 @@ class BattleService {
           _handleConnectionError(onError);
         },
       );
-
-      // Try to find a match
-      await _tryFindMatch(entry, onMatchFound, onError);
     } catch (e) {
       debugPrint('Matchmaking error: $e');
       _setConnectionStatus(ConnectionStatus.disconnected);
       onError?.call(e.toString());
     }
+  }
+
+  static void _startMatchmakingHeartbeat(String oderId) {
+    _matchmakingHeartbeatTimer?.cancel();
+    _matchmakingHeartbeatTimer =
+        Timer.periodic(_matchmakingHeartbeat, (timer) async {
+      if (_matchmakingCancelled) return;
+      try {
+        await _matchmaking.doc(oderId).update({
+          'lastSeen': FieldValue.serverTimestamp(),
+          'expiresAt': Timestamp.fromDate(DateTime.now().add(_entryTtl)),
+        });
+      } catch (e) {
+        debugPrint('Matchmaking heartbeat error: $e');
+      }
+    });
   }
 
   /// Handle connection errors with reconnection
@@ -187,151 +274,17 @@ class BattleService {
     });
   }
 
-  /// Try to find a match from the queue
-  static Future<void> _tryFindMatch(
-    MatchmakingEntry myEntry,
-    Function(BattleRoom)? onMatchFound,
-    Function(String)? onError,
-  ) async {
-    // Search parameters - expand ELO range over time
-    const eloRangeExpansion = [100, 200, 300, 500, 1000];
-
-    for (int i = 0; i < eloRangeExpansion.length; i++) {
-      final eloRange = eloRangeExpansion[i];
-      final minElo = myEntry.elo - eloRange;
-      final maxElo = myEntry.elo + eloRange;
-
-      // Query for potential opponents
-      final query = await _matchmaking
-          .where('elo', isGreaterThanOrEqualTo: minElo)
-          .where('elo', isLessThanOrEqualTo: maxElo)
-          .orderBy('elo')
-          .orderBy('joinedAt')
-          .limit(10)
-          .get();
-
-      for (final doc in query.docs) {
-        if (doc.id == myEntry.oderId) continue; // Skip self
-
-        final opponent = MatchmakingEntry.fromMap(
-          doc.data() as Map<String, dynamic>,
-          doc.id,
-        );
-
-        // Try to create match
-        final success = await _createMatch(myEntry, opponent);
-        if (success) {
-          return; // Match created
-        }
-      }
-
-      // Wait before expanding range
-      if (i < eloRangeExpansion.length - 1) {
-        await Future.delayed(const Duration(seconds: 5));
-
-        // Check if still in queue
-        final stillInQueue = await _matchmaking.doc(myEntry.oderId).get();
-        if (!stillInQueue.exists) return; // We were matched by someone else
-      }
-    }
-  }
-
-  /// Create a match between two players
-  static Future<bool> _createMatch(
-    MatchmakingEntry player1Entry,
-    MatchmakingEntry player2Entry,
-  ) async {
-    try {
-      // Use transaction to prevent race conditions
-      return await _firestore.runTransaction<bool>((transaction) async {
-        // Check both players still in queue
-        final p1Doc =
-            await transaction.get(_matchmaking.doc(player1Entry.oderId));
-        final p2Doc =
-            await transaction.get(_matchmaking.doc(player2Entry.oderId));
-
-        if (!p1Doc.exists || !p2Doc.exists) {
-          return false; // One player already matched
-        }
-
-        // Calculate difficulty based on average ELO
-        final avgElo = (player1Entry.elo + player2Entry.elo) / 2;
-        final difficulty = _getDifficultyForElo(avgElo.toInt());
-
-        // Generate puzzle
-        final puzzleResult = _generator.generatePuzzle(
-          difficulty: difficulty,
-          gridSize: 9,
-        );
-
-        // Count empty cells
-        int emptyCells = 0;
-        for (final row in puzzleResult['puzzle']!) {
-          for (final cell in row) {
-            if (cell == 0) emptyCells++;
-          }
-        }
-
-        // Create battle room
-        final player1 = BattlePlayer(
-          oderId: player1Entry.oderId,
-          displayName: player1Entry.displayName,
-          photoUrl: player1Entry.photoUrl,
-          elo: player1Entry.elo,
-          rank: AuthService.getRankDisplay(player1Entry.elo),
-        );
-
-        final player2 = BattlePlayer(
-          oderId: player2Entry.oderId,
-          displayName: player2Entry.displayName,
-          photoUrl: player2Entry.photoUrl,
-          elo: player2Entry.elo,
-          rank: AuthService.getRankDisplay(player2Entry.elo),
-        );
-
-        final battleRef = _battles.doc();
-        final battle = BattleRoom(
-          id: battleRef.id,
-          status: BattleStatus.countdown,
-          difficulty: difficulty,
-          createdAt: DateTime.now(),
-          player1: player1,
-          player2: player2,
-          puzzle: puzzleResult['puzzle'],
-          solution: puzzleResult['solution'],
-          totalCells: emptyCells,
-        );
-
-        // Write battle
-        transaction.set(battleRef, battle.toMap());
-
-        // Remove both players from matchmaking
-        transaction.delete(_matchmaking.doc(player1Entry.oderId));
-        transaction.delete(_matchmaking.doc(player2Entry.oderId));
-
-        debugPrint('Match created: ${battleRef.id}');
-        return true;
-      });
-    } catch (e) {
-      debugPrint('Create match error: $e');
-      return false;
-    }
-  }
-
-  /// Get difficulty based on average ELO
-  static String _getDifficultyForElo(int elo) {
-    if (elo < 600) return 'Easy';
-    if (elo < 1000) return 'Medium';
-    if (elo < 1400) return 'Hard';
-    return 'Expert';
-  }
+  // Match creation is server-authoritative (Cloud Functions).
 
   /// Leave matchmaking queue
   static Future<void> leaveMatchmaking() async {
+    _matchmakingCancelled = true;
     _matchmakingSubscription?.cancel();
     _matchmakingSubscription = null;
     _matchmakingTimer?.cancel();
     _matchmakingTimer = null;
+    _matchmakingHeartbeatTimer?.cancel();
+    _matchmakingHeartbeatTimer = null;
     _setConnectionStatus(ConnectionStatus.disconnected);
 
     if (AuthService.isSignedIn) {
@@ -344,36 +297,20 @@ class BattleService {
     }
   }
 
-  /// Find battle where I am a player
-  static Future<String?> _findMyBattle(String oderId) async {
-    try {
-      // Check as player1
-      var query = await _battles
-          .where('player1.oderId', isEqualTo: oderId)
-          .where('status', whereIn: ['countdown', 'playing'])
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        return query.docs.first.id;
+  static Future<BattleRoom?> _getBattleWithRetry(
+    String battleId, {
+    int maxAttempts = 20,
+    Duration delay = const Duration(milliseconds: 400),
+  }) async {
+    for (int i = 0; i < maxAttempts; i++) {
+      if (_matchmakingCancelled) return null;
+      final battle = await getBattle(battleId);
+      if (battle != null) return battle;
+      if (i < maxAttempts - 1) {
+        await Future.delayed(delay);
       }
-
-      // Check as player2
-      query = await _battles
-          .where('player2.oderId', isEqualTo: oderId)
-          .where('status', whereIn: ['countdown', 'playing'])
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        return query.docs.first.id;
-      }
-
-      return null;
-    } catch (e) {
-      debugPrint('Find my battle error: $e');
-      return null;
     }
+    return null;
   }
 
   // ==================== BATTLE MANAGEMENT ====================
@@ -394,9 +331,20 @@ class BattleService {
 
   /// Listen to battle updates
   static Stream<BattleRoom?> battleStream(String battleId) {
+    debugPrint('[BattleService] Starting battleStream for: $battleId');
     return _battles.doc(battleId).snapshots().map((doc) {
+      debugPrint('[BattleService] Snapshot received - exists: ${doc.exists}');
       if (doc.exists) {
-        return BattleRoom.fromDoc(doc);
+        try {
+          final battle = BattleRoom.fromDoc(doc);
+          debugPrint('[BattleService] Parsed battle - status: ${battle.status}, '
+              'p1Progress: ${battle.player1?.progress}, p1Mistakes: ${battle.player1?.mistakes}, '
+              'p2Progress: ${battle.player2?.progress}, p2Mistakes: ${battle.player2?.mistakes}');
+          return battle;
+        } catch (e) {
+          debugPrint('[BattleService] Error parsing battle: $e');
+          return null;
+        }
       }
       return null;
     });
@@ -415,24 +363,46 @@ class BattleService {
     }
   }
 
-  /// Update player progress
+  // Throttle for updateProgress: avoid writing every keystroke to Firestore
+  static DateTime? _lastProgressUpdate;
+  static const Duration _progressThrottle = Duration(seconds: 1); // Reduced for better real-time sync
+
+  /// Update player progress (throttled: max once per 3s except on finish)
   static Future<void> updateProgress({
     required String battleId,
     required int correctCells,
     required int totalCells,
     required int mistakes,
     List<List<int>>? currentGrid,
+    bool forceWrite = false,
   }) async {
-    if (!AuthService.isSignedIn) return;
+    if (!AuthService.isSignedIn) {
+      debugPrint('[BattleService] updateProgress - not signed in');
+      return;
+    }
+
+    final now = DateTime.now();
+    if (!forceWrite &&
+        _lastProgressUpdate != null &&
+        now.difference(_lastProgressUpdate!) < _progressThrottle) {
+      debugPrint('[BattleService] updateProgress - throttled');
+      return; // Throttled – skip this write
+    }
+    _lastProgressUpdate = now;
 
     final oderId = AuthService.userId!;
     final progress =
         totalCells > 0 ? ((correctCells / totalCells) * 100).round() : 0;
 
+    debugPrint('[BattleService] updateProgress - progress: $progress, mistakes: $mistakes, forceWrite: $forceWrite');
+
     try {
       // Determine which player we are
       final battle = await getBattle(battleId);
-      if (battle == null) return;
+      if (battle == null) {
+        debugPrint('[BattleService] updateProgress - battle not found');
+        return;
+      }
 
       String playerField;
       if (battle.player1?.oderId == oderId) {
@@ -440,17 +410,20 @@ class BattleService {
       } else if (battle.player2?.oderId == oderId) {
         playerField = 'player2';
       } else {
+        debugPrint('[BattleService] updateProgress - user not in battle');
         return; // Not in this battle
       }
 
+      debugPrint('[BattleService] updateProgress - writing to $playerField');
       await _battles.doc(battleId).update({
         '$playerField.progress': progress,
         '$playerField.correctCells': correctCells,
         '$playerField.mistakes': mistakes,
         if (currentGrid != null) '$playerField.currentGrid': currentGrid,
       });
+      debugPrint('[BattleService] updateProgress - SUCCESS');
     } catch (e) {
-      debugPrint('Update progress error: $e');
+      debugPrint('[BattleService] updateProgress ERROR: $e');
     }
   }
 
@@ -459,6 +432,7 @@ class BattleService {
     if (!AuthService.isSignedIn) return;
 
     final oderId = AuthService.userId!;
+    _lastProgressUpdate = null; // Force next progress write on next battle
 
     try {
       final battle = await getBattle(battleId);
@@ -478,7 +452,6 @@ class BattleService {
         '$playerField.finishedAt': FieldValue.serverTimestamp(),
         '$playerField.progress': 100,
       });
-
       // Check if both players finished or determine winner
       await _checkBattleEnd(battleId);
     } catch (e) {
@@ -550,13 +523,14 @@ class BattleService {
     final opponentPlayer = isPlayer1 ? p2 : p1;
     final won = currentUserId == winnerId;
 
-    // Calculate ELO change
+    // Calculate ELO change (2x multiplier for online duels vs AI)
     final gamesPlayed = LocalDuelStatsService.totalGames;
     final newElo = EloCalculator.calculateNewElo(
       playerElo: myPlayer.elo,
       opponentElo: opponentPlayer.elo,
       won: won,
       gamesPlayed: gamesPlayed,
+      multiplier: 2.0,
     );
     final eloChange = (newElo - myPlayer.elo).abs();
 
@@ -597,30 +571,56 @@ class BattleService {
     }
   }
 
+  /// Update current user's stats based on final battle result.
+  /// Use when the battle ended due to the opponent's action (stream notification).
+  static Future<void> updateMyBattleStats(String battleId) async {
+    try {
+      final battle = await getBattle(battleId);
+      if (battle == null || battle.winnerId == null) return;
+      await _updatePlayerStats(battle, battle.winnerId!);
+    } catch (e) {
+      debugPrint('updateMyBattleStats error: $e');
+    }
+  }
+
   /// Resign from battle
   static Future<void> resignBattle(String battleId) async {
-    if (!AuthService.isSignedIn) return;
+    debugPrint('[BattleService] resignBattle called for: $battleId');
+    if (!AuthService.isSignedIn) {
+      debugPrint('[BattleService] resignBattle - not signed in');
+      return;
+    }
 
     final oderId = AuthService.userId!;
 
     try {
       final battle = await getBattle(battleId);
-      if (battle == null) return;
+      if (battle == null) {
+        debugPrint('[BattleService] resignBattle - battle not found');
+        return;
+      }
 
       // Opponent wins
       final winnerId = battle.player1?.oderId == oderId
           ? battle.player2?.oderId
           : battle.player1?.oderId;
 
+      debugPrint('[BattleService] resignBattle - setting winnerId: $winnerId, status: finished');
       await _battles.doc(battleId).update({
         'status': BattleStatus.finished.name,
         'winnerId': winnerId,
         'finishedAt': FieldValue.serverTimestamp(),
       });
+      debugPrint('[BattleService] resignBattle - Firestore update SUCCESS');
 
-      debugPrint('Resigned from battle: $battleId');
+      // Update player stats (ELO decrease for resigning player)
+      if (winnerId != null) {
+        await _updatePlayerStats(battle, winnerId);
+      }
+
+      debugPrint('[BattleService] Resigned from battle: $battleId, winner: $winnerId');
     } catch (e) {
-      debugPrint('Resign battle error: $e');
+      debugPrint('[BattleService] resignBattle ERROR: $e');
     }
   }
 
@@ -630,6 +630,7 @@ class BattleService {
     _battleSubscription?.cancel();
     _connectionSubscription?.cancel();
     _matchmakingTimer?.cancel();
+    _matchmakingHeartbeatTimer?.cancel();
     _battleTimer?.cancel();
     _reconnectTimer?.cancel();
 
@@ -637,13 +638,18 @@ class BattleService {
     _battleSubscription = null;
     _connectionSubscription = null;
     _matchmakingTimer = null;
+    _matchmakingHeartbeatTimer = null;
     _battleTimer = null;
     _reconnectTimer = null;
 
     _currentBattleId = null;
     _currentBattle = null;
     _reconnectAttempts = 0;
+    _lastProgressUpdate = null;
 
+    if (!_connectionStatusController.isClosed) {
+      _connectionStatusController.close();
+    }
     _setConnectionStatus(ConnectionStatus.disconnected);
   }
 
@@ -764,14 +770,16 @@ class BattleService {
   static const Map<String, Map<String, dynamic>> aiDifficulties = {
     'easy': {
       'name': 'Rookie Bot 🤖',
+      'avatar': 'assets/bots/easy_bot.png',
       'minInterval': 8, // seconds
-      'maxInterval': 11, // seconds
+      'maxInterval': 11,
       'eloOffset': -100,
       'eloWin': 15, // ELO gained on win
       'eloLoss': 25, // ELO lost on loss
     },
     'medium': {
       'name': 'Pro Bot 🤖',
+      'avatar': 'assets/bots/pro_bot.png',
       'minInterval': 6,
       'maxInterval': 9,
       'eloOffset': 0,
@@ -780,11 +788,12 @@ class BattleService {
     },
     'hard': {
       'name': 'Master Bot 🤖',
-      'minInterval': 7, // 7-10 seconds
-      'maxInterval': 10,
+      'avatar': 'assets/bots/master_bot.png',
+      'minInterval': 6,
+      'maxInterval': 9,
       'eloOffset': 100,
-      'eloWin': 40, // More ELO for beating hard bot
-      'eloLoss': 15, // Less ELO lost against hard bot
+      'eloWin': 40,
+      'eloLoss': 15,
     },
   };
 
@@ -812,8 +821,10 @@ class BattleService {
         oderId: oderId,
         displayName: AuthService.isSignedIn ? AuthService.displayName : 'You',
         photoUrl: AuthService.photoUrl,
+        equippedFrame: LevelService.selectedFrameId,
         elo: playerElo,
         rank: LocalDuelStatsService.getRankDisplay(playerElo),
+        countryCode: AuthService.getCountryCode(),
       );
 
       // Create bot opponent with difficulty-based ELO
@@ -824,6 +835,7 @@ class BattleService {
         photoUrl: null,
         elo: botElo.clamp(100, 2000),
         rank: LocalDuelStatsService.getRankDisplay(botElo.clamp(100, 2000)),
+        avatarAsset: aiConfig['avatar'] as String?,
       );
 
       // Generate puzzle based on AI difficulty
@@ -885,17 +897,15 @@ class BattleService {
   /// Get test battle (for local testing)
   static BattleRoom? getLocalTestBattle() => _localTestBattle;
 
+  static final math.Random _random = math.Random();
+
   /// Get bot move interval based on AI difficulty (returns random seconds in range)
   static int getBotMoveInterval() {
     final aiConfig =
         aiDifficulties[_currentAiDifficulty] ?? aiDifficulties['medium']!;
     final minInterval = aiConfig['minInterval'] as int;
     final maxInterval = aiConfig['maxInterval'] as int;
-
-    // Random interval between min and max (inclusive)
-    final random =
-        DateTime.now().millisecondsSinceEpoch % (maxInterval - minInterval + 1);
-    return minInterval + random;
+    return minInterval + _random.nextInt(maxInterval - minInterval + 1);
   }
 
   /// Update local test battle

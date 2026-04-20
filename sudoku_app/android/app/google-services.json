@@ -12,7 +12,28 @@
           "package_name": "com.sudoq.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "777088106689-4kgos1pm8p48utepmtol617hc09p77ao.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sudoq.app",
+            "certificate_hash": "4e959224f44c34563789b517927ea7a3d3b68c49"
+          }
+        },
+        {
+          "client_id": "777088106689-bff9t8c4k3qscndlo3gv9uhvh0jh2c3a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sudoq.app",
+            "certificate_hash": "c0e02a9fd8abec815493f936500f330402d6abb9"
+          }
+        },
+        {
+          "client_id": "777088106689-hs4rtrhelo609aao9au6jk406gf2asm4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCng01EnuOc0KgRoHF7BD-MQfNAOqW85bc"
@@ -20,7 +41,79 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "777088106689-hs4rtrhelo609aao9au6jk406gf2asm4.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "777088106689-kdh4ke3ag5ig4v8b9n00b1getpu0e94s.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.sudoq.app"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777088106689:android:633e3e979eba04f79fd440",
+        "android_client_info": {
+          "package_name": "com.sudoq.puzzle"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "777088106689-8bcjmuhn2u5igta2e7sij21fgaan9b87.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sudoq.puzzle",
+            "certificate_hash": "4756bd7d153a6e3d31bfaac3327a9651668065ee"
+          }
+        },
+        {
+          "client_id": "777088106689-laaqbsqscbplbe1i4vtadpdc5lc8tcqd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sudoq.puzzle",
+            "certificate_hash": "4e959224f44c34563789b517927ea7a3d3b68c49"
+          }
+        },
+        {
+          "client_id": "777088106689-v9qrs5lc38i9ci04hgr4h8nie7lfc6s9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sudoq.puzzle",
+            "certificate_hash": "c0e02a9fd8abec815493f936500f330402d6abb9"
+          }
+        },
+        {
+          "client_id": "777088106689-hs4rtrhelo609aao9au6jk406gf2asm4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCng01EnuOc0KgRoHF7BD-MQfNAOqW85bc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "777088106689-hs4rtrhelo609aao9au6jk406gf2asm4.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "777088106689-kdh4ke3ag5ig4v8b9n00b1getpu0e94s.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.sudoq.app"
+              }
+            }
+          ]
         }
       }
     }

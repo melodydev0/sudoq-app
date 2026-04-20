@@ -4,6 +4,7 @@ import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/models/level_system.dart';
 import '../../../../core/models/cosmetic_rewards.dart';
 import '../../../../core/services/level_service.dart';
+import '../../../../core/services/user_sync_service.dart';
 import '../../../../core/providers/app_providers.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -119,7 +120,15 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(rank.icon, style: TextStyle(fontSize: 14.sp)),
+                rank.imagePath != null
+                    ? Image.asset(
+                        rank.imagePath!,
+                        width: 18,
+                        height: 18,
+                        errorBuilder: (_, __, ___) =>
+                            Text(rank.icon, style: TextStyle(fontSize: 14.sp)),
+                      )
+                    : Text(rank.icon, style: TextStyle(fontSize: 14.sp)),
                 const SizedBox(width: 6),
                 Text(
                   'Lv.${levelData.level}',
@@ -287,13 +296,30 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen>
                 color: isUnlocked ? null : theme.divider.withValues(alpha: 0.5),
                 borderRadius: AppTheme.buttonRadius,
               ),
-              child: Center(
-                child: Icon(
-                  frame.iconData ?? Bootstrap.border_style,
-                  color: isUnlocked ? Colors.white : theme.textSecondary,
-                  size: 24,
-                ),
-              ),
+              child: isUnlocked && frame.imagePath != null
+                  ? ClipRRect(
+                      borderRadius: AppTheme.buttonRadius,
+                      child: Image.asset(
+                        frame.imagePath!,
+                        width: 50,
+                        height: 50,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Icon(
+                            frame.iconData ?? Bootstrap.border_style,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Center(
+                      child: Icon(
+                        frame.iconData ?? Bootstrap.border_style,
+                        color: isUnlocked ? Colors.white : theme.textSecondary,
+                        size: 24,
+                      ),
+                    ),
             ),
             const SizedBox(height: 6),
             Padding(
@@ -372,10 +398,24 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen>
                 borderRadius: AppTheme.buttonRadius,
               ),
               child: isUnlocked
-                  ? Center(
-                      child: Text(themeReward.previewAsset,
-                          style: TextStyle(fontSize: 20.sp)),
-                    )
+                  ? (themeReward.imagePath != null
+                      ? ClipRRect(
+                          borderRadius: AppTheme.buttonRadius,
+                          child: Image.asset(
+                            themeReward.imagePath!,
+                            width: 60,
+                            height: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Center(
+                              child: Text(themeReward.previewAsset,
+                                  style: TextStyle(fontSize: 20.sp)),
+                            ),
+                          ),
+                        )
+                      : Center(
+                          child: Text(themeReward.previewAsset,
+                              style: TextStyle(fontSize: 20.sp)),
+                        ))
                   : Icon(Icons.lock, color: theme.textSecondary, size: 18),
             ),
             const SizedBox(height: 6),
@@ -422,6 +462,9 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen>
 
   void _equipFrame(FrameReward frame) async {
     await LevelService.setSelectedFrame(frame.id);
+    // Sync to Firestore so leaderboards and battles reflect the new frame
+    UserSyncService.syncToCloud().ignore();
+    if (!mounted) return;
     ref.read(selectedFrameProvider.notifier).state = frame.id;
     setState(() {});
 
@@ -443,6 +486,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen>
 
   void _equipTheme(ThemeReward themeReward) async {
     await LevelService.setSelectedTheme(themeReward.id);
+    if (!mounted) return;
     ref.read(selectedThemeProvider.notifier).state = themeReward.id;
     setState(() {});
 

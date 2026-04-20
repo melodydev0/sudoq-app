@@ -1,6 +1,54 @@
 {
-  "firestore": {
-    "rules": "firestore.rules"
+  "functions": {
+    "source": "functions"
   },
-  "flutter":{"platforms":{"android":{"default":{"projectId":"sudoq-online","appId":"1:777088106689:android:1e8432c097e1dd859fd440","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"sudoq-online","configurations":{"android":"1:777088106689:android:1e8432c097e1dd859fd440","ios":"1:777088106689:ios:cc76a0e4aeeb5cc09fd440"}}}}
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "admin-panel/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/app-ads.txt",
+        "headers": [
+          { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+          { "key": "Cache-Control", "value": "public, max-age=3600" }
+        ]
+      },
+      {
+        "source": "/robots.txt",
+        "headers": [
+          { "key": "Content-Type", "value": "text/plain; charset=utf-8" }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "sudoq-online",
+          "appId": "1:777088106689:android:1e8432c097e1dd859fd440",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "sudoq-online",
+          "configurations": {
+            "android": "1:777088106689:android:1e8432c097e1dd859fd440",
+            "ios": "1:777088106689:ios:cc76a0e4aeeb5cc09fd440"
+          }
+        }
+      }
+    }
+  }
 }

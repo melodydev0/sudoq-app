@@ -42,3 +42,29 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/key.properties
+/android/keystore/
+/android/admob.properties
+/android/build/
+/android/java_pid*.hprof
+
+# Firebase
+/functions/node_modules/
+/functions/.env
+/functions/.env.*
+/.firebase/
+
+# iOS
+ios/Flutter/flutter_export_environment.sh
+ios/.symlinks/
+ios/Pods/
+ios/Runner.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+
+# Admin panel (separate repository)
+/admin-panel/
+
+# Test APKs
+*.apk
+
+# Cursor / IDE
+.vscode/settings.json

@@ -1,0 +1,37 @@
+============================================================
+GOOGLE PLAY SHORT DESCRIPTIONS (max 80 characters each)
+Copy-paste each into the corresponding language in Play Console
+============================================================
+
+--- en-US (English) ---
+Zen Sudoku with daily challenges, 1v1 ELO duels & 50+ achievements. Play now!
+
+--- zh-CN (Chinese Simplified) ---
+禅意数独：每日挑战、1v1 ELO对战、50+成就。立即开始！
+
+--- hi-IN (Hindi) ---
+ज़ेन सुडोकू: दैनिक चुनौतियाँ, 1v1 ELO द्वंद्व और 50+ उपलब्धियाँ। अभी खेलें!
+
+--- es-ES (Spanish) ---
+Sudoku zen: desafíos diarios, duelos 1v1 con ELO y 50+ logros. ¡Juega ya!
+
+--- fr-FR (French) ---
+Sudoku zen : défis quotidiens, duels 1v1 ELO et 50+ succès. Jouez maintenant !
+
+--- ar (Arabic) ---
+سودوكو هادئ: تحديات يومية، مبارزات 1v1 بتصنيف ELO و50+ إنجاز. العب الآن!
+
+--- bn-BD (Bengali) ---
+জেন সুডোকু: দৈনিক চ্যালেঞ্জ, 1v1 ELO দ্বন্দ্ব ও 50+ অর্জন। এখনই খেলুন!
+
+--- pt-BR (Portuguese) ---
+Sudoku zen: desafios diários, duelos 1v1 ELO e 50+ conquistas. Jogue agora!
+
+--- ru-RU (Russian) ---
+Дзен-судоку: ежедневные испытания, дуэли 1v1 ELO и 50+ достижений. Играй!
+
+--- ja-JP (Japanese) ---
+禅の数独：デイリーチャレンジ、1v1 ELOデュエル、50以上の実績。今すぐプレイ！
+
+--- tr-TR (Turkish) ---
+Zen Sudoku: günlük meydan okuma, 1v1 ELO düello ve 50+ başarım. Hemen oyna!

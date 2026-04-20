@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode, kReleaseMode;
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_constants.dart';
@@ -17,24 +18,39 @@ class AdsService {
   static const String _keySecondChanceDate = 'second_chance_date';
   static const String _keyDailyBonusClaimed = 'daily_bonus_claimed';
   static const String _keyDailyBonusDate = 'daily_bonus_date';
+  static const String _keyInstallTimestampMs = 'install_timestamp_ms';
 
   // Daily limits
   static const int maxSecondChancePerDay = 2;
-  static const int interstitialFrequency = 2; // Show every 2 games
+  static const int interstitialFrequency = 2; // Show every 2nd game after grace period
+  static const Duration _initialInterstitialGracePeriod = Duration(hours: 3);
+
+  /// Ad unit IDs resolved per build mode: test IDs in debug, real IDs in release.
+  static String get _bannerAdUnitId => kDebugMode
+      ? 'ca-app-pub-3940256099942544/6300978111'
+      : AppConstants.bannerAdUnitId;
+  static String get _interstitialAdUnitId => kDebugMode
+      ? 'ca-app-pub-3940256099942544/1033173712'
+      : AppConstants.interstitialAdUnitId;
+  static String get _rewardedAdUnitId => kDebugMode
+      ? 'ca-app-pub-3940256099942544/5224354917'
+      : AppConstants.rewardedAdUnitId;
 
   /// Initialize the ads service
   static Future<void> init() async {
     if (_isInitialized) return;
 
     try {
-      // Emülatör ve test cihazlarında test reklamlarının gelmesi için
-      await MobileAds.instance.updateRequestConfiguration(
-        RequestConfiguration(
-          testDeviceIds: ['EMULATOR'],
-        ),
-      );
+      if (kReleaseMode && AppConstants.isUsingTestAdMobIds) {
+        debugPrint(
+          'Release build is still using test AdMob IDs. Ads are disabled.',
+        );
+        return;
+      }
+
       await MobileAds.instance.initialize();
       _isInitialized = true;
+      await _ensureInstallTimestamp();
 
       if (!StorageService.isAdsFree()) {
         loadBannerAd();
@@ -58,7 +74,7 @@ class AdsService {
 
     _bannerAd?.dispose();
     _bannerAd = BannerAd(
-      adUnitId: AppConstants.bannerAdUnitId,
+      adUnitId: _bannerAdUnitId,
       size: AdSize.banner,
       request: const AdRequest(),
       listener: BannerAdListener(
@@ -69,6 +85,12 @@ class AdsService {
           debugPrint('Banner ad failed to load: $error');
           ad.dispose();
           _bannerAd = null;
+          // Retry after 30 seconds
+          Future.delayed(const Duration(seconds: 30), () {
+            if (_bannerAd == null && shouldShowAds()) {
+              loadBannerAd();
+            }
+          });
         },
       ),
     )..load();
@@ -76,11 +98,14 @@ class AdsService {
 
   static Widget getBannerAdWidget() {
     if (!shouldShowAds() || _bannerAd == null) {
+      // Attempt reload if banner is missing
+      if (shouldShowAds() && _bannerAd == null) {
+        loadBannerAd();
+      }
       return const SizedBox.shrink();
     }
 
-    return Container(
-      alignment: Alignment.center,
+    return SizedBox(
       width: _bannerAd!.size.width.toDouble(),
       height: _bannerAd!.size.height.toDouble(),
       child: AdWidget(ad: _bannerAd!),
@@ -97,7 +122,7 @@ class AdsService {
     if (!shouldShowAds()) return;
 
     InterstitialAd.load(
-      adUnitId: AppConstants.interstitialAdUnitId,
+      adUnitId: _interstitialAdUnitId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
@@ -115,6 +140,11 @@ class AdsService {
 
   static Future<void> showInterstitialAd({VoidCallback? onAdClosed}) async {
     if (!shouldShowAds()) {
+      onAdClosed?.call();
+      return;
+    }
+
+    if (await _isWithinInitialGracePeriod()) {
       onAdClosed?.call();
       return;
     }
@@ -156,7 +186,7 @@ class AdsService {
     if (!shouldShowAds()) return;
 
     RewardedAd.load(
-      adUnitId: AppConstants.rewardedAdUnitId,
+      adUnitId: _rewardedAdUnitId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
@@ -194,18 +224,11 @@ class AdsService {
       return;
     }
 
-    bool wasRewarded = false;
-
     _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _rewardedAd = null;
-        loadRewardedAd(); // Preload next ad
-
-        // Call reward callback if user earned reward
-        if (wasRewarded) {
-          onRewarded?.call();
-        }
+        loadRewardedAd();
         onAdClosed?.call();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
@@ -220,7 +243,7 @@ class AdsService {
     await _rewardedAd!.show(
       onUserEarnedReward: (ad, reward) {
         debugPrint('User earned reward: ${reward.amount} ${reward.type}');
-        wasRewarded = true;
+        onRewarded?.call();
       },
     );
   }
@@ -303,21 +326,9 @@ class AdsService {
 
     // Show rewarded ad
     await showRewardedAd(
-      onRewarded: () async {
-        // Mark as used
-        final prefs = await SharedPreferences.getInstance();
-        final today = _getTodayString();
-        final savedDate = prefs.getString(_keySecondChanceDate) ?? '';
-
-        if (savedDate != today) {
-          await prefs.setString(_keySecondChanceDate, today);
-          await prefs.setInt(_keySecondChanceUsedToday, 1);
-        } else {
-          final usedToday = prefs.getInt(_keySecondChanceUsedToday) ?? 0;
-          await prefs.setInt(_keySecondChanceUsedToday, usedToday + 1);
-        }
-
+      onRewarded: () {
         onRewarded?.call();
+        _trackSecondChanceUsage();
       },
       onAdClosed: onAdClosed,
     );
@@ -375,18 +386,36 @@ class AdsService {
     }
 
     await showRewardedAd(
-      onRewarded: () async {
-        // Mark as claimed
-        final prefs = await SharedPreferences.getInstance();
-        final today = _getTodayString();
-        await prefs.setString(_keyDailyBonusDate, today);
-        await prefs.setBool(_keyDailyBonusClaimed, true);
-
+      onRewarded: () {
         onRewarded?.call();
+        _trackDailyBonusClaimed();
       },
       onAdClosed: onAdClosed,
       onAdNotReady: onAdNotReady,
     );
+  }
+
+  // ==================== Async Tracking (fire-and-forget) ====================
+
+  static Future<void> _trackSecondChanceUsage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = _getTodayString();
+    final savedDate = prefs.getString(_keySecondChanceDate) ?? '';
+
+    if (savedDate != today) {
+      await prefs.setString(_keySecondChanceDate, today);
+      await prefs.setInt(_keySecondChanceUsedToday, 1);
+    } else {
+      final usedToday = prefs.getInt(_keySecondChanceUsedToday) ?? 0;
+      await prefs.setInt(_keySecondChanceUsedToday, usedToday + 1);
+    }
+  }
+
+  static Future<void> _trackDailyBonusClaimed() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = _getTodayString();
+    await prefs.setString(_keyDailyBonusDate, today);
+    await prefs.setBool(_keyDailyBonusClaimed, true);
   }
 
   // ==================== Utility ====================
@@ -394,5 +423,26 @@ class AdsService {
   static String _getTodayString() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  static Future<void> _ensureInstallTimestamp() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!prefs.containsKey(_keyInstallTimestampMs)) {
+      await prefs.setInt(_keyInstallTimestampMs, DateTime.now().millisecondsSinceEpoch);
+    }
+  }
+
+  static Future<bool> _isWithinInitialGracePeriod() async {
+    final prefs = await SharedPreferences.getInstance();
+    final installedAtMs = prefs.getInt(_keyInstallTimestampMs);
+    if (installedAtMs == null) {
+      await prefs.setInt(_keyInstallTimestampMs, DateTime.now().millisecondsSinceEpoch);
+      return true;
+    }
+
+    final elapsed = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(installedAtMs),
+    );
+    return elapsed < _initialInterstitialGracePeriod;
   }
 }

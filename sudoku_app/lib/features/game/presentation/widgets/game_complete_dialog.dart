@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_theme_manager.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/l10n/app_localizations.dart';
 
 class GameCompleteDialog extends StatefulWidget {
   final bool won;
@@ -110,6 +110,7 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
   Widget build(BuildContext context) {
     ResponsiveUtils.init(context);
     final theme = AppThemeManager.colors;
+    final l10n = AppLocalizations.of(context);
     final won = widget.won;
 
     return FadeTransition(
@@ -140,13 +141,12 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                             height: 88,
                             decoration: BoxDecoration(
                               color: won
-                                  ? theme.success.withValues(alpha: 0.18)
-                                  : AppColors.error.withValues(alpha: 0.18),
+                                  ? const Color(0xFFDCE3EE).withValues(alpha: 0.22)
+                                  : const Color(0xFFC7D0DE).withValues(alpha: 0.22),
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: (won ? theme.success : AppColors.error)
-                                      .withValues(alpha: 0.2),
+                                  color: Colors.black.withValues(alpha: 0.18),
                                   blurRadius: 8,
                                   spreadRadius: 0,
                                 ),
@@ -157,7 +157,9 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                                   ? Icons.emoji_events
                                   : Icons.sentiment_dissatisfied,
                               size: 44,
-                              color: won ? theme.accent : AppColors.error,
+                              color: won
+                                  ? const Color(0xFFEEF3FA)
+                                  : const Color(0xFFD8E0EB),
                             ),
                           ),
                         ),
@@ -167,7 +169,7 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                     FadeTransition(
                       opacity: _titleFade,
                       child: Text(
-                        won ? 'Congratulations!' : 'Game Over',
+                        won ? l10n.congratulations : l10n.gameOver,
                         style: Theme.of(context)
                             .textTheme
                             .headlineMedium
@@ -183,8 +185,8 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                       opacity: _subtitleFade,
                       child: Text(
                         won
-                            ? 'You solved the puzzle!'
-                            : 'You made too many mistakes',
+                            ? l10n.congratulations
+                            : l10n.gameOverMessage,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: theme.textSecondary,
                               letterSpacing: 0.2,
@@ -204,18 +206,18 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                         child: Column(
                           children: [
                             _StatRow(
-                                label: 'Difficulty',
-                                value: widget.difficulty,
+                                label: l10n.difficulty,
+                                value: _getLocalizedDifficulty(l10n, widget.difficulty),
                                 theme: theme),
                             const SizedBox(height: 8),
                             _StatRow(
-                                label: 'Time',
+                                label: l10n.time,
                                 value: _formatTime(widget.time),
                                 theme: theme),
                             if (won) ...[
                               const SizedBox(height: 8),
                               _StatRow(
-                                label: 'Score',
+                                label: l10n.score,
                                 value: '${widget.score}',
                                 highlight: true,
                                 theme: theme,
@@ -223,7 +225,7 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                             ],
                             const SizedBox(height: 8),
                             _StatRow(
-                              label: 'Mistakes',
+                              label: l10n.mistakes,
                               value: '${widget.mistakes}/3',
                               isError: widget.mistakes > 0,
                               theme: theme,
@@ -250,7 +252,7 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                                 side: BorderSide(
                                     color: theme.accent.withValues(alpha: 0.5)),
                               ),
-                              child: const Text('Home'),
+                              child: Text(l10n.home),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -269,7 +271,7 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
                                 shadowColor:
                                     theme.textPrimary.withValues(alpha: 0.08),
                               ),
-                              child: const Text('New Game'),
+                              child: Text(l10n.newGame),
                             ),
                           ),
                         ],
@@ -289,6 +291,21 @@ class _GameCompleteDialogState extends State<GameCompleteDialog>
     final minutes = duration.inMinutes.toString().padLeft(2, '0');
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  String _getLocalizedDifficulty(AppLocalizations l10n, String difficulty) {
+    switch (difficulty.toLowerCase()) {
+      case 'easy':
+        return l10n.easy;
+      case 'medium':
+        return l10n.medium;
+      case 'hard':
+        return l10n.hard;
+      case 'expert':
+        return l10n.expert;
+      default:
+        return difficulty;
+    }
   }
 }
 
@@ -323,9 +340,9 @@ class _StatRow extends StatelessWidget {
           value,
           style: TextStyle(
             color: highlight
-                ? theme.accent
+                ? const Color(0xFFB9C3D1)
                 : isError
-                    ? AppColors.error
+                    ? const Color(0xFFA7B3C5)
                     : theme.textPrimary,
             fontSize: 14.sp,
             fontWeight: highlight ? FontWeight.bold : FontWeight.w500,

@@ -1,6 +1,7 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/l10n/app_localizations.dart';
@@ -11,6 +12,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_theme_manager.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/widgets/user_avatar_with_frame.dart';
+import '../../../../core/widgets/division_badge.dart';
 import 'matchmaking_screen.dart';
 import 'battle_game_screen.dart';
 import '../../../leaderboard/presentation/screens/leaderboard_screen.dart';
@@ -81,46 +84,47 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
   }
 
   Future<void> _onStartDuel() async {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
 
-    if (!AuthService.isSignedIn) {
-      // Don't call signInAnonymously() – it can freeze on some devices.
-      // Offer Google sign-in or Play vs AI instead.
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+
+    // Check internet connectivity before starting matchmaking
+    final hasInternet = await _checkInternetConnection();
+    if (!hasInternet) {
       if (!mounted) return;
-      final l10n = AppLocalizations.of(context);
+      final theme = AppThemeManager.colors;
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Sign in to play Duel'),
-          content: const Text(
-            'To play online you need to sign in. Sign in with Google to find opponents, or play vs AI without an account.',
+          backgroundColor: theme.card,
+          shape: const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+          title: Row(
+            children: [
+              Icon(Icons.wifi_off, color: theme.warning, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  l10n.noConnection,
+                  style: TextStyle(color: theme.textPrimary),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            l10n.noConnectionDuel,
+            style: TextStyle(color: theme.textSecondary),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(l10n.cancel),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _startAiBattle('easy');
-              },
-              child: const Text('Play vs AI'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                Navigator.of(ctx).pop();
-                await _signInWithGoogle();
-                if (mounted && AuthService.isSignedIn) {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const MatchmakingScreen(),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Sign in with Google'),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.buttonPrimary,
+                foregroundColor: theme.buttonText,
+                shape: const RoundedRectangleBorder(
+                    borderRadius: AppTheme.buttonRadius),
+              ),
+              child: Text(l10n.ok),
             ),
           ],
         ),
@@ -128,12 +132,12 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
       return;
     }
 
-    if (!mounted) return;
     try {
+      if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => const MatchmakingScreen(),
+          builder: (_) => const MatchmakingScreen(),
         ),
       );
     } catch (e, st) {
@@ -141,7 +145,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text('${l10n.errorPrefix}: $e'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 4),
           ),
@@ -150,8 +154,18 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     }
   }
 
+  Future<bool> _checkInternetConnection() async {
+    try {
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 3));
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Three small AI difficulty buttons (no pop-up). Integrated like home difficulty grid.
-  Widget _buildPlayVsAiRow(AppThemeColors theme) {
+  Widget _buildPlayVsAiRow(AppThemeColors theme, AppLocalizations l10n) {
     final nav = Navigator.of(context);
     return Row(
       children: [
@@ -159,7 +173,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
           child: _buildAiDifficultyChip(
             theme,
             difficulty: 'easy',
-            label: 'Rookie',
+            label: l10n.rookie,
             color: theme.success,
             icon: Bootstrap.emoji_smile,
             onTap: () => _startAiBattle('easy', navigator: nav),
@@ -170,7 +184,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
           child: _buildAiDifficultyChip(
             theme,
             difficulty: 'medium',
-            label: 'Pro',
+            label: l10n.pro,
             color: theme.accent,
             icon: Bootstrap.emoji_neutral,
             onTap: () => _startAiBattle('medium', navigator: nav),
@@ -181,7 +195,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
           child: _buildAiDifficultyChip(
             theme,
             difficulty: 'hard',
-            label: 'Master',
+            label: l10n.master,
             color: AppColors.error,
             icon: Bootstrap.emoji_angry,
             onTap: () => _startAiBattle('hard', navigator: nav),
@@ -199,35 +213,39 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     required IconData icon,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: theme.card,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.12),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 22, color: color),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color,
-                letterSpacing: 0.2,
+    return Semantics(
+      label: '$label difficulty',
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: theme.card,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.12),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                  letterSpacing: 0.2,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -235,14 +253,15 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Future<void> _startAiBattle(String difficulty,
       {NavigatorState? navigator}) async {
     final ctx = navigator?.context ?? context;
     debugPrint('[PlayAI] _startAiBattle entered: $difficulty');
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
 
     // Show loading dialog (use navigator context so it works when lobby is unmounted)
     final theme = AppThemeManager.colors;
@@ -321,6 +340,15 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     final result = await AuthService.signInWithApple();
     if (result != null && mounted) {
       await _syncWithCloud();
+      if (!mounted) return;
+
+      if (LocalDuelStatsService.totalGames > 0) {
+        await AuthService.syncBattleStatsFromLocal(
+            LocalDuelStatsService.exportForCloud());
+        await LocalDuelStatsService.markSynced();
+      }
+
+      if (!mounted) return;
       setState(() {
         _stats = LocalDuelStatsService.getAllStats();
         _isSyncing = false;
@@ -353,6 +381,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     if (result != null && mounted) {
       // Sync local stats to cloud
       await _syncWithCloud();
+      if (!mounted) return;
 
       // Upload local progress to cloud if needed
       if (LocalDuelStatsService.totalGames > 0) {
@@ -361,6 +390,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
         await LocalDuelStatsService.markSynced();
       }
 
+      if (!mounted) return;
       setState(() {
         _stats = LocalDuelStatsService.getAllStats();
         _isSyncing = false;
@@ -383,6 +413,16 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
       }
     } else {
       setState(() => _isSyncing = false);
+      if (mounted) {
+        final error = AuthService.lastSignInError ?? 'Google sign-in failed.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -390,6 +430,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
   Widget build(BuildContext context) {
     ResponsiveUtils.init(context);
     final theme = AppThemeManager.colors;
+    final l10n = AppLocalizations.of(context);
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
@@ -419,12 +460,12 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                         child: Column(
                           children: [
                             // Player Card
-                            _buildPlayerCard(theme),
+                            _buildPlayerCard(theme, l10n),
 
                             const SizedBox(height: 24),
 
                             // Start Duel Button
-                            _buildStartDuelButton(theme, size),
+                            _buildStartDuelButton(theme, size, l10n),
 
                             const SizedBox(height: 12),
 
@@ -435,7 +476,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                                     size: 16, color: theme.textSecondary),
                                 const SizedBox(width: 6),
                                 Text(
-                                  'Play vs AI',
+                                  l10n.playVsAi,
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -446,12 +487,12 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            _buildPlayVsAiRow(theme),
+                            _buildPlayVsAiRow(theme, l10n),
 
                             const SizedBox(height: 24),
 
                             // Stats Grid
-                            _buildStatsGrid(theme),
+                            _buildStatsGrid(theme, l10n),
 
                             const SizedBox(height: 24),
 
@@ -517,7 +558,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                     ),
                   ),
                   Text(
-                    'ELO-based competition',
+                    l10n.eloBasedCompetition,
                     style: TextStyle(
                       fontSize: 11.sp,
                       color: theme.textSecondary,
@@ -531,7 +572,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
           // Leaderboard button
           GestureDetector(
             onTap: () {
-              HapticFeedback.selectionClick();
+              HapticService.selectionClick();
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -576,7 +617,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
   }
 
   void _showDuelInfoSheet(AppThemeColors theme, AppLocalizations l10n) {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
     final isDark = theme.isDark;
 
     showModalBottomSheet(
@@ -668,21 +709,21 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                 padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.w),
                 children: [
                   _buildDivisionTile('Champion', '2300+',
-                      const Color(0xFFFF4500), '🔥', true, isDark, theme),
+                      const Color(0xFFFF4500), true, isDark, theme),
                   _buildDivisionTile('Grandmaster', '2000 - 2299',
-                      const Color(0xFF9400D3), '👑', false, isDark, theme),
+                      const Color(0xFF9400D3), false, isDark, theme),
                   _buildDivisionTile('Master', '1700 - 1999',
-                      const Color(0xFFFFA500), '🏆', false, isDark, theme),
+                      const Color(0xFFFFA500), false, isDark, theme),
                   _buildDivisionTile('Diamond', '1400 - 1699',
-                      const Color(0xFF1E90FF), '💠', false, isDark, theme),
+                      const Color(0xFF1E90FF), false, isDark, theme),
                   _buildDivisionTile('Platinum', '1100 - 1399',
-                      const Color(0xFF00BFFF), '💎', false, isDark, theme),
+                      const Color(0xFF00BFFF), false, isDark, theme),
                   _buildDivisionTile('Gold', '800 - 1099',
-                      const Color(0xFFFF8C00), '🥇', false, isDark, theme),
+                      const Color(0xFFFF8C00), false, isDark, theme),
                   _buildDivisionTile('Silver', '500 - 799',
-                      const Color(0xFFC0C0C0), '🥈', false, isDark, theme),
+                      const Color(0xFFC0C0C0), false, isDark, theme),
                   _buildDivisionTile('Bronze', '0 - 499',
-                      const Color(0xFFCD7F32), '🥉', false, isDark, theme),
+                      const Color(0xFFCD7F32), false, isDark, theme),
                 ],
               ),
             ),
@@ -698,7 +739,8 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
   }
 
   Widget _buildDivisionTile(String name, String eloRange, Color color,
-      String emoji, bool isTop, bool isDark, AppThemeColors theme) {
+      bool isTop, bool isDark, AppThemeColors theme) {
+    final l10n = AppLocalizations.of(context);
     final currentRank = _stats['rank'] ?? 'Bronze';
     final isCurrentDivision = name == currentRank;
 
@@ -737,14 +779,14 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
       ),
       child: Row(
         children: [
-          // Division emoji
+          // Division icon
           Container(
-            padding: EdgeInsets.all(10.w),
+            padding: EdgeInsets.all(8.w),
             decoration: BoxDecoration(
               color: color.withValues(alpha: isCurrentDivision ? 0.3 : 0.15),
               borderRadius: BorderRadius.circular(10.w),
             ),
-            child: Text(emoji, style: TextStyle(fontSize: 22.sp)),
+            child: DivisionBadge(rank: name, size: 32.w),
           ),
           SizedBox(width: 14.w),
 
@@ -778,7 +820,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                           borderRadius: BorderRadius.circular(6.w),
                         ),
                         child: Text(
-                          'YOU',
+                          l10n.you.toUpperCase(),
                           style: TextStyle(
                             fontSize: 9.sp,
                             fontWeight: FontWeight.bold,
@@ -913,10 +955,9 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     );
   }
 
-  Widget _buildPlayerCard(AppThemeColors theme) {
+  Widget _buildPlayerCard(AppThemeColors theme, AppLocalizations l10n) {
     final elo = _stats['elo'] ?? 1000;
-    final rank = _stats['rank'] ?? 'Row';
-    final isGoogleSignedIn = AuthService.isSignedIn && !AuthService.isAnonymous;
+    final rank = _stats['rank'] ?? 'Rookie';
 
     // Rank colors
     final rankColor = _getRankColor(rank);
@@ -938,27 +979,11 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
         children: [
           Row(
             children: [
-              // Avatar
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isGoogleSignedIn ? Colors.green : Colors.amber,
-                    width: 3,
-                  ),
-                ),
-                child: ClipOval(
-                  child: isGoogleSignedIn && AuthService.photoUrl != null
-                      ? Image.network(
-                          AuthService.photoUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              _buildDefaultAvatar(theme),
-                        )
-                      : _buildDefaultAvatar(theme),
-                ),
+              // Avatar with frame
+              UserAvatarWithFrame.currentUser(
+                size: 56.w,
+                showCountryFlag: true,
+                showAnimation: true,
               ),
               const SizedBox(width: 16),
 
@@ -971,9 +996,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                       children: [
                         Flexible(
                           child: Text(
-                            isGoogleSignedIn
-                                ? AuthService.displayName
-                                : 'Guest Player',
+                            AuthService.displayName,
                             style: TextStyle(
                               fontSize: 18.sp,
                               fontWeight: FontWeight.bold,
@@ -982,25 +1005,6 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (!isGoogleSignedIn) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Local',
-                              style: TextStyle(
-                                fontSize: 10.sp,
-                                color: Colors.orange,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ],
@@ -1050,16 +1054,13 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  LocalDuelStatsService.getRankEmoji(rank),
-                  style: const TextStyle(fontSize: 28),
-                ),
+                DivisionBadge(rank: rank, size: 32.w, showGlow: true),
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Current Rank',
+                      l10n.currentRank,
                       style: TextStyle(
                         fontSize: 10.sp,
                         color: theme.textSecondary,
@@ -1108,18 +1109,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     }
   }
 
-  Widget _buildDefaultAvatar(AppThemeColors theme) {
-    return Container(
-      color: theme.accent.withValues(alpha: 0.2),
-      child: Icon(
-        Icons.person,
-        size: 32,
-        color: theme.accent,
-      ),
-    );
-  }
-
-  Widget _buildStartDuelButton(AppThemeColors theme, Size size) {
+  Widget _buildStartDuelButton(AppThemeColors theme, Size size, AppLocalizations l10n) {
     return GestureDetector(
       onTap: _onStartDuel,
       child: Container(
@@ -1146,7 +1136,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
             ),
             const SizedBox(width: 12),
             Text(
-              'Start Duel',
+              l10n.startDuel,
               style: TextStyle(
                 fontSize: 18.sp,
                 fontWeight: FontWeight.w600,
@@ -1160,10 +1150,10 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
     );
   }
 
-  Widget _buildStatsGrid(AppThemeColors theme) {
+  Widget _buildStatsGrid(AppThemeColors theme, AppLocalizations l10n) {
     final wins = _stats['wins'] ?? 0;
     final losses = _stats['losses'] ?? 0;
-    final winRate = (_stats['winRate'] ?? 0.0).toStringAsFixed(1);
+    final winRateValue = (_stats['winRate'] ?? 0.0).toStringAsFixed(1);
     final winStreak = _stats['winStreak'] ?? 0;
 
     return Row(
@@ -1171,7 +1161,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
         Expanded(
           child: _buildStatCard(
             theme,
-            'Wins',
+            l10n.wins,
             '$wins',
             Colors.green,
             Bootstrap.check_circle_fill,
@@ -1181,7 +1171,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
         Expanded(
           child: _buildStatCard(
             theme,
-            'Losses',
+            l10n.losses,
             '$losses',
             Colors.red,
             Bootstrap.x_circle_fill,
@@ -1191,8 +1181,8 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
         Expanded(
           child: _buildStatCard(
             theme,
-            'Win Rate',
-            '$winRate%',
+            l10n.winRate,
+            '$winRateValue%',
             Colors.blue,
             Bootstrap.percent,
           ),
@@ -1201,7 +1191,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
         Expanded(
           child: _buildStatCard(
             theme,
-            'Streak',
+            l10n.streak,
             '$winStreak',
             Colors.orange,
             Bootstrap.fire,
@@ -1285,7 +1275,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Rank Progress',
+                AppLocalizations.of(context).rankProgress,
                 style: TextStyle(
                   fontSize: 16.sp,
                   fontWeight: FontWeight.bold,
@@ -1294,7 +1284,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
               ),
               if (rank != 'Champion')
                 Text(
-                  '+$toNextRank ELO to next rank',
+                  AppLocalizations.of(context).eloToNextRank(toNextRank.toInt()),
                   style: TextStyle(
                     fontSize: 12.sp,
                     color: theme.textSecondary,
@@ -1357,7 +1347,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                               fontSize: 9.sp,
                               fontWeight: FontWeight.bold,
                               color: progressPercent > 40
-                                  ? Colors.white
+                                  ? theme.buttonText
                                   : theme.textPrimary,
                             ),
                           ),
@@ -1376,13 +1366,19 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                '${LocalDuelStatsService.getRankEmoji(rank)} $rank',
-                style: TextStyle(
-                  fontSize: 12.sp,
-                  fontWeight: FontWeight.w600,
-                  color: theme.textPrimary,
-                ),
+              Row(
+                children: [
+                  DivisionBadge(rank: rank, size: 20),
+                  const SizedBox(width: 6),
+                  Text(
+                    rank,
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.w600,
+                      color: theme.textPrimary,
+                    ),
+                  ),
+                ],
               ),
               Text(
                 '${currentRange[0]} - ${currentRange[1]} ELO',
@@ -1399,6 +1395,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
   }
 
   Widget _buildSyncSection(AppThemeColors theme) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1428,7 +1425,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Sync Your Progress',
+                      l10n.syncYourProgress,
                       style: TextStyle(
                         fontSize: 16.sp,
                         fontWeight: FontWeight.bold,
@@ -1437,7 +1434,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Sign in to save your progress across devices',
+                      l10n.signInToSave,
                       style: TextStyle(
                         fontSize: 12.sp,
                         color: theme.textSecondary,
@@ -1461,7 +1458,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                           strokeWidth: 2, color: Colors.white),
                     )
                   : const Icon(Bootstrap.google, size: 18),
-              label: Text(_isSyncing ? 'Syncing...' : 'Sign In with Google'),
+              label: Text(_isSyncing ? l10n.syncingData : l10n.signInWithGoogle),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
@@ -1481,7 +1478,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
               child: OutlinedButton.icon(
                 onPressed: _isSyncing ? null : _signInWithApple,
                 icon: const Icon(Bootstrap.apple, size: 18),
-                label: const Text('Sign in with Apple'),
+                label: Text(l10n.signInWithApple),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: theme.textPrimary,
                   side: BorderSide(color: theme.divider),
@@ -1502,7 +1499,7 @@ class _BattleLobbyScreenState extends ConsumerState<BattleLobbyScreen> {
                 Icon(Icons.info_outline, size: 14, color: theme.textSecondary),
                 const SizedBox(width: 6),
                 Text(
-                  '${LocalDuelStatsService.totalGames} games will be synced',
+                  l10n.gamesWillBeSynced(LocalDuelStatsService.totalGames),
                   style: TextStyle(
                     fontSize: 11.sp,
                     color: theme.textSecondary,

@@ -1,6 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../../../core/utils/responsive_utils.dart';
@@ -91,6 +91,7 @@ class _ExperienceScreenState extends State<ExperienceScreen>
     );
 
     Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
       _contentController.forward();
       _cardController.forward();
     });
@@ -105,7 +106,7 @@ class _ExperienceScreenState extends State<ExperienceScreen>
   }
 
   Future<void> _onSelectOption(int index) async {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
     setState(() => _selectedIndex = index);
 
     await Future.delayed(const Duration(milliseconds: 300));

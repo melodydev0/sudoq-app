@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import '../../../../core/models/leaderboard_user.dart';
 import '../../../../core/models/cosmetic_rewards.dart';
 import '../../../../core/widgets/animated_frame.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_theme_manager.dart';
+import '../../../../core/widgets/division_badge.dart';
 
 class LeaderboardTile extends StatelessWidget {
   final LeaderboardUser user;
@@ -37,7 +38,7 @@ class LeaderboardTile extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        HapticFeedback.selectionClick();
+        HapticService.selectionClick();
         onTap();
       },
       child: Container(
@@ -107,10 +108,7 @@ class LeaderboardTile extends StatelessWidget {
           ],
         ),
         child: Center(
-          child: Text(
-            _getRankEmoji(user.rank),
-            style: TextStyle(fontSize: _getResponsiveFontSize(context, 18)),
-          ),
+          child: _buildMedalWidget(user.rank, context),
         ),
       );
     }
@@ -172,32 +170,7 @@ class LeaderboardTile extends StatelessWidget {
           frame: frame,
           size: avatarSize,
           showAnimation: frame != null,
-          child: Container(
-            width: avatarSize,
-            height: avatarSize,
-            decoration: BoxDecoration(
-              color: theme.card,
-              borderRadius: BorderRadius.circular(avatarSize * 0.28),
-              border: Border.all(
-                color: user.isOnline ? theme.success : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: user.avatarUrl != null && user.avatarUrl!.length == 1
-                ? _buildAvatarLetter(
-                    context, theme, avatarSize, user.avatarUrl!)
-                : user.avatarUrl != null && user.avatarUrl!.startsWith('http')
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(avatarSize * 0.22),
-                        child: Image.network(
-                          user.avatarUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              _buildDefaultAvatar(context, theme, avatarSize),
-                        ),
-                      )
-                    : _buildDefaultAvatar(context, theme, avatarSize),
-          ),
+          child: _buildAvatarContent(context, theme, avatarSize, frame),
         ),
         // Country flag
         Positioned(
@@ -240,8 +213,66 @@ class LeaderboardTile extends StatelessWidget {
     );
   }
 
+  Widget _buildAvatarContent(BuildContext context, AppThemeColors theme,
+      double avatarSize, FrameReward? frame) {
+    if (frame != null) {
+      if (frame.imagePath != null) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(avatarSize * 0.25),
+          child: Image.asset(
+            frame.imagePath!,
+            width: avatarSize,
+            height: avatarSize,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+                _buildFrameIconFallback(avatarSize, frame),
+          ),
+        );
+      }
+      return _buildFrameIconFallback(avatarSize, frame);
+    }
+
+    // No frame - show photo or rank-based avatar
+    return Container(
+      width: avatarSize,
+      height: avatarSize,
+      decoration: BoxDecoration(
+        color: theme.card,
+        borderRadius: BorderRadius.circular(avatarSize * 0.28),
+        border: Border.all(
+          color: user.isOnline ? theme.success : Colors.transparent,
+          width: 2,
+        ),
+      ),
+      child: user.avatarUrl != null && user.avatarUrl!.startsWith('http')
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(avatarSize * 0.22),
+              child: Image.network(
+                user.avatarUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    _buildDefaultAvatar(context, theme, avatarSize),
+              ),
+            )
+          : _buildDefaultAvatar(context, theme, avatarSize),
+    );
+  }
+
   Widget _buildDefaultAvatar(
       BuildContext context, AppThemeColors theme, double size) {
+    final rankAsset = _rankAssetForDivision(user.division);
+    return Center(
+      child: Image.asset(
+        rankAsset,
+        width: size * 0.65,
+        height: size * 0.65,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildInitialFallback(theme, size),
+      ),
+    );
+  }
+
+  Widget _buildInitialFallback(AppThemeColors theme, double size) {
     return Center(
       child: Text(
         user.username.isNotEmpty ? user.username[0].toUpperCase() : '?',
@@ -254,15 +285,56 @@ class LeaderboardTile extends StatelessWidget {
     );
   }
 
-  Widget _buildAvatarLetter(
-      BuildContext context, AppThemeColors theme, double size, String letter) {
-    return Center(
-      child: Text(
-        letter.toUpperCase(),
-        style: TextStyle(
-          fontSize: size * 0.5,
-          fontWeight: FontWeight.bold,
-          color: theme.accent,
+  String _rankAssetForDivision(String? division) {
+    switch ((division ?? '').toLowerCase()) {
+      case 'champion':
+        return 'assets/ranks/sudoku_king.png';
+      case 'grandmaster':
+        return 'assets/ranks/legend.png';
+      case 'master':
+        return 'assets/ranks/master.png';
+      case 'diamond':
+      case 'expert':
+        return 'assets/ranks/expert.png';
+      case 'platinum':
+      case 'talented':
+        return 'assets/ranks/talented.png';
+      case 'gold':
+      case 'amateur':
+        return 'assets/ranks/amateur.png';
+      case 'silver':
+      case 'bronze':
+      case 'iron':
+        return 'assets/ranks/novice.png';
+      default:
+        return 'assets/ranks/novice.png';
+    }
+  }
+
+  Widget _buildFrameIconFallback(double avatarSize, FrameReward frame) {
+    return Container(
+      width: avatarSize,
+      height: avatarSize,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: frame.gradientColors,
+        ),
+        borderRadius: BorderRadius.circular(avatarSize * 0.25),
+        boxShadow: [
+          BoxShadow(
+            color: frame.gradientColors.first.withValues(alpha: 0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Icon(
+          frame.iconData ?? Icons.star,
+          color: Colors.white,
+          size: avatarSize * 0.5,
         ),
       ),
     );
@@ -332,27 +404,33 @@ class LeaderboardTile extends StatelessWidget {
               ),
             ),
             if (type == 'ranked' && user.division != null)
-              // Division badge
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.w),
-                decoration: BoxDecoration(
-                  color: isCurrentUser
-                      ? theme.buttonText.withValues(alpha: 0.25)
-                      : _getDivisionColor(user.division!)
-                          .withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6.w),
-                ),
-                child: Text(
-                  user.division!,
-                  style: TextStyle(
-                    fontSize: _getResponsiveFontSize(context, 10),
-                    fontWeight: FontWeight.bold,
-                    color: isCurrentUser
-                        ? theme.buttonText
-                        : _getDivisionColor(user.division!),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DivisionBadge(rank: user.division!, size: 18),
+                  SizedBox(width: 4.w),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.w),
+                    decoration: BoxDecoration(
+                      color: isCurrentUser
+                          ? theme.buttonText.withValues(alpha: 0.25)
+                          : _getDivisionColor(user.division!)
+                              .withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6.w),
+                    ),
+                    child: Text(
+                      user.division!,
+                      style: TextStyle(
+                        fontSize: _getResponsiveFontSize(context, 10),
+                        fontWeight: FontWeight.bold,
+                        color: isCurrentUser
+                            ? theme.buttonText
+                            : _getDivisionColor(user.division!),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                ],
               ),
             // Achievements count
             Row(
@@ -437,6 +515,26 @@ class LeaderboardTile extends StatelessWidget {
       default:
         return Colors.grey;
     }
+  }
+
+  Widget _buildMedalWidget(int rank, BuildContext context) {
+    final medalPaths = {1: 'assets/medals/gold.png', 2: 'assets/medals/silver.png', 3: 'assets/medals/bronze.png'};
+    final path = medalPaths[rank];
+    if (path != null) {
+      return Image.asset(
+        path,
+        width: 22,
+        height: 22,
+        errorBuilder: (_, __, ___) => Text(
+          _getRankEmoji(rank),
+          style: TextStyle(fontSize: _getResponsiveFontSize(context, 18)),
+        ),
+      );
+    }
+    return Text(
+      _getRankEmoji(rank),
+      style: TextStyle(fontSize: _getResponsiveFontSize(context, 18)),
+    );
   }
 
   String _getRankEmoji(int rank) {

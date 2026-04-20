@@ -38,6 +38,8 @@ class Achievement {
     this.isComingSoon = false,
   });
 
+  String get imagePath => 'assets/achievements/$id.png';
+
   double get progress =>
       targetValue > 0 ? (currentValue / targetValue).clamp(0.0, 1.0) : 0.0;
 
@@ -103,14 +105,17 @@ class Achievement {
       title: json['title'] as String,
       description: json['description'] as String,
       icon: json['icon'] as String,
-      category: AchievementCategory.values.byName(json['category'] as String),
-      targetValue: json['targetValue'] as int,
-      currentValue: json['currentValue'] as int? ?? 0,
+      category: AchievementCategory.values.firstWhere(
+        (e) => e.name == (json['category'] as String),
+        orElse: () => AchievementCategory.seedling,
+      ),
+      targetValue: (json['targetValue'] as num).toInt(),
+      currentValue: (json['currentValue'] as num?)?.toInt() ?? 0,
       isUnlocked: json['isUnlocked'] as bool? ?? false,
       unlockedAt: json['unlockedAt'] != null
           ? DateTime.parse(json['unlockedAt'] as String)
           : null,
-      xpReward: json['xpReward'] as int? ?? 0,
+      xpReward: (json['xpReward'] as num?)?.toInt() ?? 0,
       isComingSoon: json['isComingSoon'] as bool? ?? false,
     );
   }
@@ -153,7 +158,7 @@ class Achievements {
         id: 'medium_5',
         title: 'Rising Star',
         description: 'Complete 5 medium puzzles',
-        icon: '⭐',
+        icon: '🌟',
         category: AchievementCategory.seedling,
         targetValue: 5,
         xpReward: 40,
@@ -444,7 +449,7 @@ class Achievements {
         id: 'medium_master',
         title: 'Medium Master',
         description: 'Complete 200 medium puzzles',
-        icon: '⭐',
+        icon: '🌟',
         category: AchievementCategory.elite,
         targetValue: 200,
         xpReward: 250,
@@ -771,14 +776,14 @@ class UserAchievements {
               ?.map((e) => e as String)
               .toList() ??
           [],
-      totalDailyCompleted: json['totalDailyCompleted'] as int? ?? 0,
+      totalDailyCompleted: (json['totalDailyCompleted'] as num?)?.toInt() ?? 0,
       fastestTimes: (json['fastestTimes'] as Map<String, dynamic>?)
-              ?.map((k, v) => MapEntry(k, v as int)) ??
+              ?.map((k, v) => MapEntry(k, (v as num).toInt())) ??
           {},
       difficultyWins: (json['difficultyWins'] as Map<String, dynamic>?)
-              ?.map((k, v) => MapEntry(k, v as int)) ??
+              ?.map((k, v) => MapEntry(k, (v as num).toInt())) ??
           {},
-      expertPerfectWins: json['expertPerfectWins'] as int? ?? 0,
+      expertPerfectWins: (json['expertPerfectWins'] as num?)?.toInt() ?? 0,
     );
   }
 }

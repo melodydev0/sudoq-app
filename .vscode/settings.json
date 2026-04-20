@@ -1,3 +1,18 @@
 {
-    "java.configuration.updateBuildConfiguration": "automatic"
+    "java.configuration.updateBuildConfiguration": "disabled",
+    "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.1.8-hotspot",
+    "java.import.gradle.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot",
+    "jdk.jdkhome": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot",
+    "jdk.project.jdkhome": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot",
+    "java.import.gradle.enabled": false,
+    "java.import.gradle.wrapper.enabled": false,
+    "java.autobuild.enabled": false,
+    "java.import.exclusions": [
+        "**/android/**",
+        "**/build/**",
+        "**/node_modules/**",
+        "**/.metadata/**",
+        "**/archetype-resources/**",
+        "**/META-INF/maven/**"
+    ]
 }

@@ -45,14 +45,44 @@ flutter pub get
 
 ### AdMob (optional)
 1. Create an AdMob app and get Ad Unit IDs.
-2. In `lib/core/services/ads_service.dart` replace test IDs with your banner and interstitial (and rewarded) Ad Unit IDs.
+2. Set Android App ID in `android/local.properties`:
+   - `admob.app.id=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy`
+3. Pass ad unit IDs with `--dart-define` when building/running release:
+   - `--dart-define=ADMOB_BANNER_AD_UNIT_ID=ca-app-pub-.../...`
+   - `--dart-define=ADMOB_INTERSTITIAL_AD_UNIT_ID=ca-app-pub-.../...`
+   - `--dart-define=ADMOB_REWARDED_AD_UNIT_ID=ca-app-pub-.../...`
+4. The app now blocks release builds if test AdMob IDs are still configured.
 
 ### In-App Purchase (optional)
 1. Create the “ads-free” product in Google Play Console.
 2. In `lib/core/services/purchase_service.dart` set the product ID to match.
 
 ### Firebase (optional)
-- Add `google-services.json` (Android) and configure `lib/firebase_options.dart` (e.g. via FlutterFire CLI).
+- Add `google-services.json` (Android) and `GoogleService-Info.plist` (iOS) and configure `lib/firebase_options.dart` (e.g. via FlutterFire CLI).
+
+### Push Notifications (FCM)
+- Android: FCM works out-of-the-box once `google-services.json` is in place.
+- iOS: Upload an APNs key (`.p8`) or APNs certificate to **Firebase Console → Project Settings → Cloud Messaging → iOS app**. Without this, push notifications will not be delivered on iOS.
+- Users can toggle push notifications from the **Settings → Notifications** section in the app.
+
+### Location (iOS setup required)
+Add these keys to `ios/Runner/Info.plist` before building for iOS:
+```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>SudoQ uses your approximate location to match you with nearby players and show regional leaderboards.</string>
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>SudoQ uses your approximate location to match you with nearby players and show regional leaderboards.</string>
+```
+Android permissions are already declared in `AndroidManifest.xml`.
+
+### Cloud Functions (optional – required for matchmaking, leaderboard cache, purchase verification)
+```bash
+cd functions && npm install
+firebase deploy --only functions
+```
+Set environment variables before deploy:
+- `PLAY_PACKAGE_NAME` – your Android package name (e.g. `com.sudoq.app`)
+- `APPLE_SHARED_SECRET` – App Store shared secret for receipt validation
 
 ### Run
 ```bash
@@ -69,7 +99,8 @@ lib/
 │   ├── models/          # settings, statistics, game_state, achievement, daily, level, battle, leaderboard, global_stats
 │   ├── providers/       # app_providers.dart (Riverpod: settings, statistics, sudokuGenerator, achievements, frame)
 │   ├── services/        # storage, ads_service, purchase_service, sound, sudoku_generator, level, achievement,
-│   │                    # daily_challenge, battle, local_duel_stats, global_stats, auth, user_sync
+│   │                    # daily_challenge, battle, local_duel_stats, global_stats, auth, user_sync,
+│   │                    # notification_service, entitlement_service
 │   ├── theme/           # app_theme, app_theme_manager, app_colors
 │   ├── utils/           # responsive_utils
 │   └── widgets/         # animated_frame, celebration_effect

@@ -16,32 +16,24 @@ import 'core/services/daily_challenge_service.dart';
 import 'core/services/global_stats_service.dart';
 import 'core/services/sound_service.dart';
 import 'core/services/local_duel_stats_service.dart';
+import 'core/services/auth_service.dart';
+import 'core/services/entitlement_service.dart';
+import 'core/services/notification_service.dart';
+import 'core/services/location_service.dart';
+import 'core/services/user_sync_service.dart';
+import 'core/services/remote_config_service.dart';
 import 'core/providers/app_providers.dart';
 import 'core/l10n/app_localizations.dart';
-import 'core/navigation/app_route_observer.dart';
+import 'core/l10n/gen_localizations.dart';
+import 'core/navigation/app_router.dart';
 
-import 'features/onboarding/presentation/screens/splash_screen.dart';
-
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } catch (e) {
-    debugPrint('Firebase init failed (app will continue): $e');
-  }
-
-  await StorageService.init();
-
-  // Set preferred orientations
-  await SystemChrome.setPreferredOrientations([
+  SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-
-  // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -49,65 +41,126 @@ void main() async {
     ),
   );
 
-  runApp(
-    const ProviderScope(
-      child: SudokuApp(),
-    ),
-  );
+  NotificationService.registerBackgroundHandler();
 
-  // Initialize services in background
-  _initBackgroundServices();
+  FlutterError.onError = (details) {
+    debugPrint('Flutter error: ${details.exceptionAsString()}');
+  };
+
+  runApp(const _BootstrapApp());
 }
 
-/// Initialize services in background - optimized for performance
-Future<void> _initBackgroundServices() async {
-  // Wait for UI to settle first
-  await Future.delayed(const Duration(milliseconds: 800));
+/// Minimal bootstrap - no MaterialApp, just a colored box
+class _BootstrapApp extends StatefulWidget {
+  const _BootstrapApp();
 
-  // Phase 1: Essential services (fast)
-  try {
-    await AppThemeManager.init();
-    await LevelService.init();
-    await LocalDuelStatsService.init();
-  } catch (e) {
-    debugPrint('Phase 1 init error: $e');
+  @override
+  State<_BootstrapApp> createState() => _BootstrapAppState();
+}
+
+class _BootstrapAppState extends State<_BootstrapApp> {
+  Widget? _realApp;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
   }
 
-  // Small break to let UI breathe
-  await Future.delayed(const Duration(milliseconds: 300));
+  Future<void> _bootstrap() async {
+    try {
+      // Let the simple widget render first
+      await Future.delayed(const Duration(milliseconds: 100));
 
-  // Phase 2: Game services
-  try {
-    await AchievementService.init();
-    await DailyChallengeService.init();
-  } catch (e) {
-    debugPrint('Phase 2 init error: $e');
+      // Init storage
+      await StorageService.init();
+
+      // Wait for Firebase before continuing (required for all Firebase services)
+      try {
+        await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform);
+        debugPrint('Firebase initialized');
+      } catch (e) {
+        debugPrint('Firebase error: $e');
+      }
+
+      // Wait a frame before showing real app
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // Build real app
+      if (mounted) {
+        setState(() {
+          _realApp = const ProviderScope(child: SudokuApp());
+        });
+      }
+
+      // Background services - start after Firebase is ready
+      // Remote Config first (needs Firebase) so A/B variant is ready before paywall opens
+      Future.delayed(const Duration(milliseconds: 800), _initServicesLater);
+      RemoteConfigService.init().ignore();
+    } catch (e) {
+      debugPrint('Bootstrap error: $e');
+      // Still show the app even if bootstrap partially failed
+      if (mounted && _realApp == null) {
+        setState(() {
+          _realApp = const ProviderScope(child: SudokuApp());
+        });
+      }
+    }
   }
 
-  // Another break
-  await Future.delayed(const Duration(milliseconds: 300));
+  @override
+  Widget build(BuildContext context) {
+    // If real app is ready, show it
+    if (_realApp != null) return _realApp!;
 
-  // Phase 3: Stats and sound
-  try {
-    await GlobalStatsService.instance.init();
-    await SoundService().init();
-  } catch (e) {
-    debugPrint('Phase 3 init error: $e');
+    // Minimal loading - just gradient background matching splash screen
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1A1A2E), Color(0xFF16213E), Color(0xFF0F3460)],
+        ),
+      ),
+    );
   }
+}
 
-  // Phase 4: Heavy services (AdMob, Purchase) - delayed more
+Future<void> _initServicesLater() async {
+  // Firebase is already initialized at this point
+
+  try { await AppThemeManager.init(); } catch (_) {}
+  try { await LevelService.init(); } catch (_) {}
+  try { await LocalDuelStatsService.init(); } catch (_) {}
+
+  await Future.delayed(const Duration(milliseconds: 500));
+
+  try { await AchievementService.init(); } catch (_) {}
+  try { await DailyChallengeService.init(); } catch (_) {}
+
+  await Future.delayed(const Duration(milliseconds: 500));
+
+  try { await GlobalStatsService.instance.init(); } catch (_) {}
+  try { await SoundService().init(); } catch (_) {}
+
   await Future.delayed(const Duration(seconds: 2));
 
-  try {
-    await AdsService.init();
-  } catch (e) {
-    debugPrint('Ads init error: $e');
+  try { await AdsService.init(); } catch (_) {}
+  try { await PurchaseService.init(); } catch (_) {}
+  try { await EntitlementService.refreshFromCloud(); } catch (_) {}
+  try { await NotificationService.init(); } catch (_) {}
+
+  if (!AuthService.isSignedIn) {
+    AuthService.signInAnonymously().ignore();
   }
 
-  try {
-    await PurchaseService.init();
-  } catch (e) {
-    debugPrint('Purchase init error: $e');
+  // Sync any pending offline ELO/XP changes to cloud
+  UserSyncService.autoSync().ignore();
+
+  // Refresh location silently for returning users who already granted permission
+  if (LocationService.wasPermissionAsked) {
+    LocationService.fetchAndSync().ignore();
   }
 }
 
@@ -118,18 +171,39 @@ class SudokuApp extends ConsumerStatefulWidget {
   ConsumerState<SudokuApp> createState() => _SudokuAppState();
 }
 
-class _SudokuAppState extends ConsumerState<SudokuApp> {
+class _SudokuAppState extends ConsumerState<SudokuApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // Listen to theme changes
     AppThemeManager.themeNotifier.addListener(_onThemeChanged);
+    WidgetsBinding.instance.addObserver(this);
+
+    EntitlementService.onPremiumChanged = (isPremium) {
+      if (mounted) {
+        ref.read(adsFreeProvider.notifier).state = isPremium;
+      }
+    };
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     AppThemeManager.themeNotifier.removeListener(_onThemeChanged);
+    EntitlementService.onPremiumChanged = null;
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      UserSyncService.autoSync().ignore();
+      RemoteConfigService.refresh().ignore();
+      EntitlementService.refreshFromCloud().then((_) {
+        if (mounted) {
+          ref.read(adsFreeProvider.notifier).state = StorageService.isAdsFree();
+        }
+      }).ignore();
+    }
   }
 
   void _onThemeChanged() {
@@ -141,50 +215,36 @@ class _SudokuAppState extends ConsumerState<SudokuApp> {
     final settings = ref.watch(settingsProvider);
     final currentTheme = AppThemeManager.currentTheme;
 
-    // Determine locale based on settings
     Locale? appLocale;
     if (settings.languageCode.isNotEmpty) {
       appLocale = Locale(settings.languageCode);
     }
 
-    // Determine theme
-    ThemeData theme;
-    ThemeData darkTheme;
-    ThemeMode themeMode;
-
-    if (currentTheme == AppThemeType.champion) {
-      // Champion's Glory - Premium warm gold
-      theme = AppThemeManager.getThemeData(context);
-      darkTheme = AppTheme.darkTheme;
-      themeMode = ThemeMode.light; // Force light for premium theme
-    } else if (currentTheme == AppThemeType.grandmaster) {
-      // Grandmaster Prestige - Premium lavender
-      theme = AppThemeManager.getThemeData(context);
-      darkTheme = AppTheme.darkTheme;
-      themeMode = ThemeMode.light; // Force light for premium theme
+    // All themes are now handled uniformly through AppThemeManager.
+    // Premium themes (champion/grandmaster) inherit from AppTheme.lightTheme via copyWith,
+    // ensuring M3 and full component theme consistency.
+    final ThemeData resolvedTheme = AppThemeManager.getThemeData(context);
+    final ThemeData resolvedDarkTheme = AppTheme.darkTheme;
+    final ThemeMode resolvedThemeMode;
+    if (currentTheme == AppThemeType.dark) {
+      resolvedThemeMode = ThemeMode.dark;
+    } else if (currentTheme == AppThemeType.champion ||
+        currentTheme == AppThemeType.grandmaster) {
+      resolvedThemeMode = ThemeMode.light;
     } else {
-      // Normal theme: derive themeMode from current theme selection (not settings)
-      theme = AppTheme.lightTheme;
-      darkTheme = AppTheme.darkTheme;
-      if (currentTheme == AppThemeType.dark) {
-        themeMode = ThemeMode.dark;
-      } else if (currentTheme == AppThemeType.light) {
-        themeMode = ThemeMode.light;
-      } else {
-        themeMode = ThemeMode.system;
-      }
+      resolvedThemeMode = ThemeMode.light;
     }
 
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'SudoQ',
       debugShowCheckedModeBanner: false,
-      theme: theme,
-      darkTheme: darkTheme,
-      themeMode: themeMode,
-      navigatorObservers: [appRouteObserver],
-      // Localization
+      theme: resolvedTheme,
+      darkTheme: resolvedDarkTheme,
+      themeMode: resolvedThemeMode,
+      routerConfig: appRouter,
       localizationsDelegates: const [
         AppLocalizations.delegate,
+        GenLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
@@ -192,9 +252,7 @@ class _SudokuAppState extends ConsumerState<SudokuApp> {
       supportedLocales: supportedLocales,
       locale: appLocale,
       localeResolutionCallback: (locale, supportedLocales) {
-        if (appLocale != null) {
-          return appLocale;
-        }
+        if (appLocale != null) return appLocale;
         if (locale != null) {
           for (var supportedLocale in supportedLocales) {
             if (supportedLocale.languageCode == locale.languageCode) {
@@ -204,8 +262,6 @@ class _SudokuAppState extends ConsumerState<SudokuApp> {
         }
         return const Locale('en');
       },
-
-      home: const SplashScreen(),
     );
   }
 }

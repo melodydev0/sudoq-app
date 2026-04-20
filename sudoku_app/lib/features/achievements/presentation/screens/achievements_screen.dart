@@ -422,14 +422,19 @@ class _AchievementsScreenState extends ConsumerState<AchievementsScreen>
                       : null,
                 ),
                 child: Center(
-                  child: Icon(
-                    iconData,
-                    size: labelSize * 1.6,
-                    color: isComingSoon
-                        ? theme.textSecondary
-                        : achievement.isUnlocked
-                            ? iconColor
-                            : theme.textSecondary.withValues(alpha: 0.6),
+                  child: Image.asset(
+                    achievement.imagePath,
+                    width: labelSize * 1.6,
+                    height: labelSize * 1.6,
+                    errorBuilder: (_, __, ___) => Icon(
+                      iconData,
+                      size: labelSize * 1.6,
+                      color: isComingSoon
+                          ? theme.textSecondary
+                          : achievement.isUnlocked
+                              ? iconColor
+                              : theme.textSecondary.withValues(alpha: 0.6),
+                    ),
                   ),
                 ),
               ),

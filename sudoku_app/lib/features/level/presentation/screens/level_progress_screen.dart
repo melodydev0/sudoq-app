@@ -1,11 +1,12 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/models/level_system.dart';
 import '../../../../core/models/achievement.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/theme/app_theme_manager.dart';
+import '../../../../core/utils/lottie_loader.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/services/sound_service.dart';
 
@@ -22,6 +23,8 @@ class LevelProgressScreen extends StatefulWidget {
   final List<Achievement> newAchievements;
   final int achievementXp;
   final double xpBoostMultiplier; // 2x XP boost from watching ad
+  final bool isPremiumXpBoost; // True when 2x is a premium perk
+  final List<GameXpBreakdownEntry> gameXpBreakdown;
   final VoidCallback onContinue;
 
   const LevelProgressScreen({
@@ -37,6 +40,8 @@ class LevelProgressScreen extends StatefulWidget {
     this.newAchievements = const [],
     this.achievementXp = 0,
     this.xpBoostMultiplier = 1.0,
+    this.isPremiumXpBoost = false,
+    this.gameXpBreakdown = const [],
     required this.onContinue,
   });
 
@@ -52,8 +57,9 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
   late AnimationController _xpCountController;
   late AnimationController _progressController;
   late AnimationController _pulseController;
-  late AnimationController _levelUpFillController;
   late AnimationController _levelUpTextController;
+  late AnimationController _premiumBoostCardController;
+  late AnimationController _premiumBoostCountController;
 
   // Animations
   late Animation<double> _headerScale;
@@ -62,6 +68,8 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
   // State
   int _displayedXp = 0;
   int _totalCalculatedXp = 0; // Sum of breakdown items
+  int _premiumBoostXp = 0;
+  bool _showPremiumBoostAnimation = false;
   List<_XpBreakdownItem> _xpBreakdown = [];
   List<_ConfettiParticle> _confettiParticles = [];
   bool _showLevelUp = false;
@@ -76,8 +84,11 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
     _generateConfetti();
     _startAnimationSequence();
 
-    // Play victory sound when result screen opens
-    SoundService().playVictory();
+    // Play victory sound after a short delay so it doesn't overlap
+    // with the game_complete sound that was triggered on the game screen
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted) SoundService().playVictory();
+    });
   }
 
   void _calculateXpBreakdown() {
@@ -85,15 +96,27 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
     final mult = widget.xpBoostMultiplier.clamp(1.0, 10.0);
     final gameXp = widget.xpEarned - widget.achievementXp;
 
-    // Game XP (difficulty + performance + streak) – base value before 2x
-    final baseGame = (gameXp / mult).round();
-    if (baseGame > 0) {
-      _xpBreakdown.add(_XpBreakdownItem(
-        icon: _getDifficultyIcon(widget.difficulty),
-        label: 'difficulty',
-        xp: baseGame,
-        color: _getDifficultyColor(widget.difficulty),
-      ));
+    if (widget.gameXpBreakdown.isNotEmpty) {
+      for (final entry in widget.gameXpBreakdown) {
+        if (entry.xp <= 0) continue;
+        _xpBreakdown.add(_XpBreakdownItem(
+          icon: _iconForBreakdownLabel(entry.label),
+          label: entry.label,
+          xp: entry.xp,
+          color: _colorForBreakdownLabel(entry.label),
+          extra: entry.label == 'streak' ? widget.previousLevelData.streakDays : null,
+        ));
+      }
+    } else {
+      final baseGame = (gameXp / mult).round();
+      if (baseGame > 0) {
+        _xpBreakdown.add(_XpBreakdownItem(
+          icon: _getDifficultyIcon(widget.difficulty),
+          label: 'difficulty',
+          xp: baseGame,
+          color: _getDifficultyColor(widget.difficulty),
+        ));
+      }
     }
 
     // Achievement XP – base value before 2x
@@ -126,6 +149,13 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
 
     _totalCalculatedXp =
         _xpBreakdown.fold<int>(0, (sum, item) => sum + item.xp);
+
+    if (widget.isPremiumXpBoost && mult > 1.0) {
+      final premiumBoostItem = _xpBreakdown.where((item) => item.label == 'xpBoost');
+      _premiumBoostXp = premiumBoostItem.isNotEmpty ? premiumBoostItem.first.xp : 0;
+    } else {
+      _premiumBoostXp = 0;
+    }
   }
 
   void _checkLevelUp() {
@@ -161,8 +191,8 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
       vsync: this,
     )..addListener(() {
         setState(() {
-          _displayedXp =
-              (_totalCalculatedXp * _xpCountController.value).round();
+          final baseTarget = (_totalCalculatedXp - _premiumBoostXp).clamp(0, _totalCalculatedXp);
+          _displayedXp = (baseTarget * _xpCountController.value).round();
         });
       });
 
@@ -177,15 +207,28 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
       vsync: this,
     )..repeat(reverse: true);
 
-    // Level up: XP bar fills then "Level Up" appears inside
-    _levelUpFillController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
     _levelUpTextController = AnimationController(
       duration: const Duration(milliseconds: 450),
       vsync: this,
     );
+
+    _premiumBoostCardController = AnimationController(
+      duration: const Duration(milliseconds: 650),
+      vsync: this,
+    );
+
+    _premiumBoostCountController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    )..addListener(() {
+        if (!_showPremiumBoostAnimation) return;
+        final baseTarget =
+            (_totalCalculatedXp - _premiumBoostXp).clamp(0, _totalCalculatedXp);
+        setState(() {
+          _displayedXp =
+              baseTarget + (_premiumBoostXp * _premiumBoostCountController.value).round();
+        });
+      });
   }
 
   void _generateConfetti() {
@@ -226,27 +269,33 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
     _confettiController.forward();
 
     await Future.delayed(const Duration(milliseconds: 600));
-    _xpCountController.forward();
+    await _xpCountController.forward();
+
+    if (widget.isPremiumXpBoost && _premiumBoostXp > 0 && mounted) {
+      setState(() => _showPremiumBoostAnimation = true);
+      HapticService.mediumImpact();
+      _premiumBoostCardController.forward(from: 0);
+      await _premiumBoostCountController.forward(from: 0);
+    }
 
     await Future.delayed(const Duration(milliseconds: 400));
     _progressController.forward();
 
     if (_showLevelUp && mounted) {
-      await Future.delayed(const Duration(milliseconds: 350));
-      if (mounted) _levelUpFillController.forward();
-      _levelUpFillController.addStatusListener((status) {
-        if (status == AnimationStatus.completed && mounted) {
-          _levelUpTextController.forward();
-        }
+      // Level-up text must appear AFTER the old bar fills to 100%
+      // _progressController phase 1 (0→0.60) lasts 0.60 × 1400ms = 840ms
+      // Add a small buffer so the bar is visually full before the banner pops
+      Future.delayed(const Duration(milliseconds: 950), () {
+        if (mounted) _levelUpTextController.forward();
       });
     }
 
-    // Start showing XP breakdown items one by one
+    // Start showing XP breakdown items one by one (runs concurrently with progress)
     for (int i = 0; i < _xpBreakdown.length; i++) {
       await Future.delayed(const Duration(milliseconds: 200));
       if (mounted) {
         setState(() => _currentBreakdownIndex = i);
-        HapticFeedback.lightImpact();
+        HapticService.lightImpact();
       }
     }
   }
@@ -258,8 +307,9 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
     _xpCountController.dispose();
     _progressController.dispose();
     _pulseController.dispose();
-    _levelUpFillController.dispose();
     _levelUpTextController.dispose();
+    _premiumBoostCardController.dispose();
+    _premiumBoostCountController.dispose();
     super.dispose();
   }
 
@@ -314,14 +364,9 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
 
                       SizedBox(height: size.height * 0.015),
 
-                      // Level Up card (in-flow widget when user levelled up)
-                      if (_showLevelUp) ...[
-                        _buildLevelUpCard(l10n, theme, size),
-                        SizedBox(height: size.height * 0.015),
-                      ],
-
-                      // Level progress (current/new level)
-                      _buildLevelProgress(l10n, theme, size),
+                      // Integrated level progress (single card)
+                      _buildLevelProgress(l10n, theme, size,
+                          highlightLevelUp: _showLevelUp),
 
                       SizedBox(height: size.height * 0.015),
 
@@ -352,17 +397,21 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
   }
 
   Widget _buildConfetti() {
-    return AnimatedBuilder(
-      animation: _confettiController,
-      builder: (context, child) {
-        return CustomPaint(
-          size: MediaQuery.of(context).size,
-          painter: _ConfettiPainter(
-            particles: _confettiParticles,
-            progress: _confettiController.value,
-          ),
-        );
-      },
+    return LottieLoader.lottieOrFallback(
+      assetPath: 'assets/lottie/effects/confetti.json',
+      fit: BoxFit.cover,
+      fallback: AnimatedBuilder(
+        animation: _confettiController,
+        builder: (context, child) {
+          return CustomPaint(
+            size: MediaQuery.of(context).size,
+            painter: _ConfettiPainter(
+              particles: _confettiParticles,
+              progress: _confettiController.value,
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -440,7 +489,7 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(Bootstrap.star_fill,
-                      color: Colors.amber, size: 20),
+                      color: Color(0xFFC5CEDC), size: 20),
                   const SizedBox(width: 6),
                   Text(
                     l10n.score,
@@ -463,27 +512,83 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
                 ),
               ),
 
+              if (_showPremiumBoostAnimation && _premiumBoostXp > 0) ...[
+                const SizedBox(height: 8),
+                FadeTransition(
+                  opacity: CurvedAnimation(
+                    parent: _premiumBoostCardController,
+                    curve: Curves.easeOut,
+                  ),
+                  child: ScaleTransition(
+                    scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+                      CurvedAnimation(
+                        parent: _premiumBoostCardController,
+                        curve: Curves.easeOutBack,
+                      ),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEBEFF5),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFC3CCD9)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Bootstrap.star_fill,
+                            color: Color(0xFF98A6BB),
+                            size: 14,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '${l10n.premium} ${l10n.xpBoost}',
+                            style: TextStyle(
+                              fontSize: 11.sp,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF8A98AD),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '+${(_premiumBoostXp * _premiumBoostCountController.value).round()} XP',
+                            style: TextStyle(
+                              fontSize: 11.sp,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF7E8DA4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 12),
 
-              // XP Breakdown with animations
+              // XP Breakdown: use remaining card space first, scroll only if it overflows.
               Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: List.generate(_xpBreakdown.length, (index) {
-                      final item = _xpBreakdown[index];
-                      final isVisible = index <= _currentBreakdownIndex;
+                child: ClipRect(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: List.generate(_xpBreakdown.length, (index) {
+                        final item = _xpBreakdown[index];
+                        final isVisible = index <= _currentBreakdownIndex;
 
-                      return AnimatedOpacity(
-                        duration: const Duration(milliseconds: 300),
-                        opacity: isVisible ? 1.0 : 0.0,
-                        child: AnimatedSlide(
+                        return AnimatedOpacity(
                           duration: const Duration(milliseconds: 300),
-                          offset:
-                              isVisible ? Offset.zero : const Offset(0.5, 0),
-                          child: _buildBreakdownRow(item, l10n, theme),
-                        ),
-                      );
-                    }),
+                          opacity: isVisible ? 1.0 : 0.0,
+                          child: AnimatedSlide(
+                            duration: const Duration(milliseconds: 300),
+                            offset:
+                                isVisible ? Offset.zero : const Offset(0.5, 0),
+                            child: _buildBreakdownRow(item, l10n, theme),
+                          ),
+                        );
+                      }),
+                    ),
                   ),
                 ),
               ),
@@ -549,21 +654,40 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
   }
 
   Widget _buildLevelProgress(
-      AppLocalizations l10n, AppThemeColors theme, Size size) {
+      AppLocalizations l10n, AppThemeColors theme, Size size,
+      {bool highlightLevelUp = false}) {
     final rank = widget.newLevelData.rank;
-    final progress = widget.newLevelData.levelProgress;
+    final prevLevel = widget.previousLevelData.level;
+    final newLevel = widget.newLevelData.level;
+    final prevProgress = widget.previousLevelData.levelProgress;
+    final newProgress = widget.newLevelData.levelProgress;
 
     return Container(
       padding: EdgeInsets.all(size.width * 0.035),
       decoration: BoxDecoration(
         color: theme.card,
         borderRadius: BorderRadius.circular(14),
+        border: highlightLevelUp
+            ? Border.all(
+                color: const Color(0xFFBCC6D4).withValues(alpha: 0.7),
+                width: 1.4,
+              )
+            : null,
+        boxShadow: highlightLevelUp
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.14),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : null,
       ),
       child: Column(
         children: [
           Row(
             children: [
-              Text(rank.icon, style: TextStyle(fontSize: 24.sp)),
+              _buildRankIcon(rank),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -578,7 +702,9 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
                       ),
                     ),
                     Text(
-                      'Level ${widget.newLevelData.level}',
+                      highlightLevelUp
+                          ? 'Level $newLevel reached'
+                          : 'Level $newLevel',
                       style: TextStyle(
                         fontSize: 12.sp,
                         color: theme.textSecondary,
@@ -587,64 +713,196 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
                   ],
                 ),
               ),
-              Text(
-                '${(progress * 100).toInt()}%',
-                style: TextStyle(
-                  fontSize: 14.sp,
-                  fontWeight: FontWeight.bold,
-                  color: theme.accent,
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFBCC6D4).withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  highlightLevelUp
+                      ? 'LV $newLevel'
+                      : '${(newProgress * 100).toInt()}%',
+                  style: TextStyle(
+                    fontSize: 12.sp,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF9FAABD),
+                    letterSpacing: 0.2,
+                  ),
                 ),
               ),
             ],
           ),
+          if (highlightLevelUp) ...[
+            const SizedBox(height: 10),
+            FadeTransition(
+              opacity: _levelUpTextController,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.92, end: 1.0).animate(
+                  CurvedAnimation(
+                    parent: _levelUpTextController,
+                    curve: Curves.easeOutCubic,
+                  ),
+                ),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDDE4EE).withValues(alpha: 0.75),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFFBCC6D4).withValues(alpha: 0.75),
+                    ),
+                  ),
+                  child: Text(
+                    'Level ${widget.newLevelData.level} unlocked',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF8E9AAF),
+                      letterSpacing: 0.25,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           AnimatedBuilder(
             animation: _progressController,
             builder: (context, child) {
-              final raw = _progressController.value;
-              final eased = Curves.easeOutCubic.transform(raw);
-              final animatedProgress = progress * eased;
-              final isFull = animatedProgress >= 0.98;
-              return Container(
-                decoration: isFull
-                    ? BoxDecoration(
+              final t = _progressController.value.clamp(0.0, 1.0);
+
+              // Normal game complete: stay in same level and increase within same bar.
+              if (!highlightLevelUp || newLevel <= prevLevel) {
+                final eased = Curves.easeOutCubic.transform(t);
+                final animatedProgress =
+                    prevProgress + (newProgress - prevProgress) * eased;
+                final isFull = animatedProgress >= 0.98;
+
+                return Column(
+                  children: [
+                    Container(
+                      decoration: isFull
+                          ? BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: theme.accent.withValues(alpha: 0.3),
+                                  blurRadius: 10,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            )
+                          : null,
+                      child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: theme.accent.withValues(alpha: 0.4),
-                            blurRadius: 12,
-                            spreadRadius: 1,
-                          ),
-                        ],
-                      )
-                    : null,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: animatedProgress,
-                    backgroundColor: theme.isDark
-                        ? Colors.white.withValues(alpha: 0.12)
-                        : Colors.black.withValues(alpha: 0.12),
-                    valueColor: AlwaysStoppedAnimation(theme.accent),
-                    minHeight: 12,
+                        child: LinearProgressIndicator(
+                          value: animatedProgress,
+                          backgroundColor: theme.isDark
+                              ? Colors.white.withValues(alpha: 0.12)
+                              : Colors.black.withValues(alpha: 0.12),
+                          valueColor: AlwaysStoppedAnimation(theme.accent),
+                          minHeight: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Lv $newLevel',
+                          style: TextStyle(
+                              fontSize: 11.sp, color: theme.textSecondary),
+                        ),
+                        Text(
+                          'Lv ${newLevel + 1}',
+                          style: TextStyle(
+                              fontSize: 11.sp, color: theme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              // Level up flow:
+              // Phase 1 (0.00-0.60): fill old level bar to 100%
+              // Phase 2 (0.60-0.72): short hold/transition
+              // Phase 3 (0.72-1.00): new level bar fills from 0 to new progress
+              double animatedProgress;
+              int leftLevel;
+              int rightLevel;
+              bool isTransitioning = false;
+
+              if (t < 0.60) {
+                final p = Curves.easeOutCubic.transform((t / 0.60).clamp(0.0, 1.0));
+                animatedProgress = prevProgress + (1.0 - prevProgress) * p;
+                leftLevel = prevLevel;
+                rightLevel = prevLevel + 1;
+              } else if (t < 0.72) {
+                animatedProgress = 1.0;
+                leftLevel = prevLevel;
+                rightLevel = prevLevel + 1;
+                isTransitioning = true;
+              } else {
+                final p = Curves.easeOutCubic.transform(
+                    ((t - 0.72) / 0.28).clamp(0.0, 1.0));
+                animatedProgress = newProgress * p;
+                leftLevel = newLevel;
+                rightLevel = newLevel + 1;
+              }
+
+              final glow = isTransitioning || (t >= 0.72 && animatedProgress >= 0.98);
+
+              return Column(
+                children: [
+                  Container(
+                    decoration: glow
+                        ? BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: theme.accent.withValues(alpha: 0.34),
+                                blurRadius: 12,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          )
+                        : null,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: LinearProgressIndicator(
+                        value: animatedProgress,
+                        backgroundColor: theme.isDark
+                            ? Colors.white.withValues(alpha: 0.12)
+                            : Colors.black.withValues(alpha: 0.12),
+                        valueColor: AlwaysStoppedAnimation(theme.accent),
+                        minHeight: 12,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Lv $leftLevel',
+                        style: TextStyle(fontSize: 11.sp, color: theme.textSecondary),
+                      ),
+                      Text(
+                        'Lv $rightLevel',
+                        style: TextStyle(fontSize: 11.sp, color: theme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ],
               );
             },
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Lv ${widget.newLevelData.level}',
-                style: TextStyle(fontSize: 11.sp, color: theme.textSecondary),
-              ),
-              Text(
-                'Lv ${widget.newLevelData.level + 1}',
-                style: TextStyle(fontSize: 11.sp, color: theme.textSecondary),
-              ),
-            ],
           ),
         ],
       ),
@@ -660,23 +918,23 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Colors.orange.withValues(alpha: 0.15),
-            Colors.deepOrange.withValues(alpha: 0.1),
+            const Color(0xFFCED6E3).withValues(alpha: 0.24),
+            const Color(0xFFAAB5C5).withValues(alpha: 0.16),
           ],
         ),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+        border: Border.all(color: const Color(0xFFB3BDCC).withValues(alpha: 0.5)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.2),
+              color: const Color(0xFFBCC6D5).withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Bootstrap.trophy_fill,
-                color: Colors.orange, size: 18),
+                color: Color(0xFF93A0B3), size: 18),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -704,7 +962,7 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
           Text(
             '${widget.newLevelData.seasonXp} XP',
             style: TextStyle(
-              color: Colors.orange,
+              color: const Color(0xFF9BA8BB),
               fontWeight: FontWeight.bold,
               fontSize: 15.sp,
             ),
@@ -789,10 +1047,20 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
               borderRadius: BorderRadius.circular(10),
             ),
             child: Center(
-              child: Text(
-                achievement.icon,
-                style: TextStyle(fontSize: 20.sp),
-              ),
+              child: achievement.imagePath.isNotEmpty
+                  ? Image.asset(
+                      achievement.imagePath,
+                      width: 24,
+                      height: 24,
+                      errorBuilder: (_, __, ___) => Text(
+                        achievement.icon,
+                        style: TextStyle(fontSize: 20.sp),
+                      ),
+                    )
+                  : Text(
+                      achievement.icon,
+                      style: TextStyle(fontSize: 20.sp),
+                    ),
             ),
           ),
           const SizedBox(width: 8),
@@ -857,7 +1125,7 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
       AppLocalizations l10n, AppThemeColors theme, Size size) {
     return GestureDetector(
       onTap: () {
-        HapticFeedback.mediumImpact();
+        HapticService.mediumImpact();
         widget.onContinue();
       },
       child: Container(
@@ -882,188 +1150,11 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
             style: TextStyle(
               fontSize: 16.sp,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: theme.buttonText,
             ),
           ),
         ),
       ),
-    );
-  }
-
-  /// Level Up card widget – shown in-flow on the game complete screen (not overlay).
-  Widget _buildLevelUpCard(
-      AppLocalizations l10n, AppThemeColors theme, Size size) {
-    final rank = widget.newLevelData.rank;
-    final prevLevel = widget.previousLevelData.level;
-    final prevProgress = widget.previousLevelData.levelProgress;
-
-    return AnimatedBuilder(
-      animation:
-          Listenable.merge([_levelUpFillController, _levelUpTextController]),
-      builder: (context, child) {
-        final fillT =
-            Curves.easeOutCubic.transform(_levelUpFillController.value);
-        final barProgress = prevProgress + (1.0 - prevProgress) * fillT;
-        final textT = Curves.easeOut.transform(_levelUpTextController.value);
-        final textOpacity = textT;
-        final textScale = 0.92 + 0.08 * textT;
-
-        return Container(
-          width: double.infinity,
-          padding: EdgeInsets.symmetric(
-            horizontal: size.width * 0.04,
-            vertical: 14.w,
-          ),
-          decoration: BoxDecoration(
-            color: theme.card,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: theme.accent.withValues(alpha: 0.35),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: theme.textPrimary.withValues(alpha: 0.12),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-              BoxShadow(
-                color: theme.accent.withValues(alpha: 0.2),
-                blurRadius: 20,
-                spreadRadius: 0,
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Text(rank.icon, style: TextStyle(fontSize: 26.sp)),
-                  SizedBox(width: 12.w),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _getLocalizedRank(l10n, rank),
-                          style: TextStyle(
-                            fontSize: 16.sp,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.2,
-                            color: theme.textPrimary,
-                          ),
-                        ),
-                        Text(
-                          'Level $prevLevel',
-                          style: TextStyle(
-                            fontSize: 12.sp,
-                            color: theme.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    '${(barProgress * 100).toInt()}%',
-                    style: TextStyle(
-                      fontSize: 15.sp,
-                      fontWeight: FontWeight.bold,
-                      color: theme.accent,
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 14.w),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final w = constraints.maxWidth;
-                    final fillWidth = w * barProgress.clamp(0.0, 1.0);
-                    return SizedBox(
-                      height: 44.w,
-                      child: Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: theme.isDark
-                                ? Colors.white.withValues(alpha: 0.12)
-                                : theme.textPrimary.withValues(alpha: 0.08),
-                          ),
-                          SizedBox(
-                            width: fillWidth,
-                            height: double.infinity,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: theme.accent,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: theme.accent.withValues(alpha: 0.4),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Center(
-                            child: Opacity(
-                              opacity: textOpacity,
-                              child: Transform.scale(
-                                scale: textScale,
-                                child: Text(
-                                  'LEVEL UP',
-                                  style: TextStyle(
-                                    fontSize: 15.sp,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 1.2,
-                                    color: barProgress > 0.5
-                                        ? Colors.white
-                                        : theme.accent,
-                                    shadows: barProgress > 0.5
-                                        ? [
-                                            Shadow(
-                                              color: Colors.black
-                                                  .withValues(alpha: 0.25),
-                                              offset: const Offset(0, 1),
-                                              blurRadius: 2,
-                                            ),
-                                          ]
-                                        : null,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-              SizedBox(height: 8.w),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Lv $prevLevel',
-                    style:
-                        TextStyle(fontSize: 11.sp, color: theme.textSecondary),
-                  ),
-                  Text(
-                    'Lv ${prevLevel + 1}',
-                    style:
-                        TextStyle(fontSize: 11.sp, color: theme.textSecondary),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -1086,15 +1177,53 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
   Color _getDifficultyColor(String difficulty) {
     switch (difficulty) {
       case 'Easy':
-        return const Color(0xFF4CAF50);
+        return const Color(0xFFCED6E2);
       case 'Medium':
-        return const Color(0xFFFF9800);
+        return const Color(0xFFBCC6D4);
       case 'Hard':
-        return const Color(0xFFf44336);
+        return const Color(0xFFA9B5C6);
       case 'Expert':
-        return const Color(0xFF9C27B0);
+        return const Color(0xFF96A4B8);
       default:
         return Colors.grey;
+    }
+  }
+
+  IconData _iconForBreakdownLabel(String label) {
+    switch (label) {
+      case 'difficulty':
+        return _getDifficultyIcon(widget.difficulty);
+      case 'performance':
+        return Bootstrap.graph_up_arrow;
+      case 'daily':
+        return Bootstrap.calendar_day;
+      case 'ranked':
+        return Bootstrap.trophy_fill;
+      case 'streak':
+        return Bootstrap.fire;
+      case 'streak_daily':
+        return Bootstrap.fire;
+      default:
+        return Bootstrap.star_fill;
+    }
+  }
+
+  Color _colorForBreakdownLabel(String label) {
+    switch (label) {
+      case 'difficulty':
+        return _getDifficultyColor(widget.difficulty);
+      case 'performance':
+        return const Color(0xFF4ECDC4);
+      case 'daily':
+        return const Color(0xFF5B5F97);
+      case 'ranked':
+        return const Color(0xFF3498DB);
+      case 'streak':
+        return const Color(0xFFFF8C00);
+      case 'streak_daily':
+        return const Color(0xFFFF6B35);
+      default:
+        return const Color(0xFF9B59B6);
     }
   }
 
@@ -1111,6 +1240,19 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
       default:
         return difficulty;
     }
+  }
+
+  Widget _buildRankIcon(RankInfo rank) {
+    if (rank.imagePath != null) {
+      return Image.asset(
+        rank.imagePath!,
+        width: 28,
+        height: 28,
+        errorBuilder: (_, __, ___) =>
+            Text(rank.icon, style: TextStyle(fontSize: 24.sp)),
+      );
+    }
+    return Text(rank.icon, style: TextStyle(fontSize: 24.sp));
   }
 
   String _getLocalizedRank(AppLocalizations l10n, RankInfo rank) {
@@ -1136,14 +1278,20 @@ class _LevelProgressScreenState extends State<LevelProgressScreen>
     switch (item.label) {
       case 'difficulty':
         return l10n.difficulty;
+      case 'performance':
+        return l10n.performanceBonus;
       case 'perfect':
         return l10n.perfectGame;
       case 'daily':
         return l10n.dailyChallenge;
+      case 'ranked':
+        return l10n.ranked;
       case 'duel':
         return l10n.duel;
       case 'streak':
-        return '${item.extra} ${l10n.daily} Streak';
+        return '${item.extra ?? 0} ${l10n.daily} ${l10n.streak}';
+      case 'streak_daily':
+        return l10n.dailyStreakReward;
       case 'time':
         return l10n.fastTime;
       case 'achievement':

@@ -1,5 +1,33 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+/// Safely parse DateTime from Firestore (Timestamp, DateTime, or String)
+DateTime? _parseDateTime(dynamic value) {
+  if (value == null) return null;
+  if (value is Timestamp) return value.toDate();
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  return null;
+}
+
+/// Helper to parse 2D array from Firestore (handles both JSON string and List)
+List<List<int>>? _parse2DArray(dynamic value) {
+  if (value == null) return null;
+  
+  List<dynamic> list;
+  if (value is String) {
+    list = jsonDecode(value) as List<dynamic>;
+  } else if (value is List) {
+    list = value;
+  } else {
+    return null;
+  }
+  
+  return list
+      .map((row) => (row as List).map((cell) => (cell as num).toInt()).toList())
+      .toList();
+}
 
 /// Battle room status
 enum BattleStatus {
@@ -16,8 +44,11 @@ class BattlePlayer {
   final String oderId;
   final String displayName;
   final String? photoUrl;
+  final String? equippedFrame;
   final int elo;
   final String rank;
+  final String? countryCode;
+  final String? avatarAsset;
 
   // Game state
   final int progress; // 0-100 percentage
@@ -31,8 +62,11 @@ class BattlePlayer {
     required this.oderId,
     required this.displayName,
     this.photoUrl,
+    this.equippedFrame,
     required this.elo,
     required this.rank,
+    this.countryCode,
+    this.avatarAsset,
     this.progress = 0,
     this.mistakes = 0,
     this.correctCells = 0,
@@ -46,18 +80,21 @@ class BattlePlayer {
       oderId: map['oderId'] ?? '',
       displayName: map['displayName'] ?? 'Player',
       photoUrl: map['photoUrl'],
-      elo: map['elo'] ?? 800,
-      rank: map['rank'] ?? 'Row',
+      equippedFrame: map['equippedFrame'] as String?,
+      elo: map['elo'] ?? 450,
+      rank: map['rank'] ?? 'Rookie',
+      countryCode: map['countryCode'],
+      avatarAsset: map['avatarAsset'],
       progress: map['progress'] ?? 0,
       mistakes: map['mistakes'] ?? 0,
       correctCells: map['correctCells'] ?? 0,
       isFinished: map['isFinished'] ?? false,
       finishedAt: map['finishedAt'] != null
-          ? (map['finishedAt'] as Timestamp).toDate()
+          ? _parseDateTime(map['finishedAt'])
           : null,
       currentGrid: map['currentGrid'] != null
           ? (map['currentGrid'] as List)
-              .map((row) => (row as List).map((cell) => cell as int).toList())
+              .map((row) => (row as List).map((cell) => (cell as num).toInt()).toList())
               .toList()
           : null,
     );
@@ -68,8 +105,11 @@ class BattlePlayer {
       'oderId': oderId,
       'displayName': displayName,
       'photoUrl': photoUrl,
+      'equippedFrame': equippedFrame,
       'elo': elo,
       'rank': rank,
+      'countryCode': countryCode,
+      'avatarAsset': avatarAsset,
       'progress': progress,
       'mistakes': mistakes,
       'correctCells': correctCells,
@@ -83,8 +123,11 @@ class BattlePlayer {
     String? oderId,
     String? displayName,
     String? photoUrl,
+    String? equippedFrame,
     int? elo,
     String? rank,
+    String? countryCode,
+    String? avatarAsset,
     int? progress,
     int? mistakes,
     int? correctCells,
@@ -96,8 +139,11 @@ class BattlePlayer {
       oderId: oderId ?? this.oderId,
       displayName: displayName ?? this.displayName,
       photoUrl: photoUrl ?? this.photoUrl,
+      equippedFrame: equippedFrame ?? this.equippedFrame,
       elo: elo ?? this.elo,
       rank: rank ?? this.rank,
+      countryCode: countryCode ?? this.countryCode,
+      avatarAsset: avatarAsset ?? this.avatarAsset,
       progress: progress ?? this.progress,
       mistakes: mistakes ?? this.mistakes,
       correctCells: correctCells ?? this.correctCells,
@@ -157,28 +203,20 @@ class BattleRoom {
       ),
       difficulty: map['difficulty'] ?? 'Medium',
       createdAt: map['createdAt'] != null
-          ? (map['createdAt'] as Timestamp).toDate()
+          ? _parseDateTime(map['createdAt']) ?? DateTime.now()
           : DateTime.now(),
       startedAt: map['startedAt'] != null
-          ? (map['startedAt'] as Timestamp).toDate()
+          ? _parseDateTime(map['startedAt'])
           : null,
       finishedAt: map['finishedAt'] != null
-          ? (map['finishedAt'] as Timestamp).toDate()
+          ? _parseDateTime(map['finishedAt'])
           : null,
       player1:
           map['player1'] != null ? BattlePlayer.fromMap(map['player1']) : null,
       player2:
           map['player2'] != null ? BattlePlayer.fromMap(map['player2']) : null,
-      puzzle: map['puzzle'] != null
-          ? (map['puzzle'] as List)
-              .map((row) => (row as List).map((cell) => cell as int).toList())
-              .toList()
-          : null,
-      solution: map['solution'] != null
-          ? (map['solution'] as List)
-              .map((row) => (row as List).map((cell) => cell as int).toList())
-              .toList()
-          : null,
+      puzzle: _parse2DArray(map['puzzle']),
+      solution: _parse2DArray(map['solution']),
       winnerId: map['winnerId'],
       totalCells: map['totalCells'] ?? 0,
       isTestBattle: map['isTestBattle'] ?? false,
@@ -236,6 +274,7 @@ class MatchmakingEntry {
   final String oderId;
   final String displayName;
   final String? photoUrl;
+  final String? equippedFrame;
   final int elo;
   final String division;
   final DateTime joinedAt;
@@ -245,6 +284,7 @@ class MatchmakingEntry {
     required this.oderId,
     required this.displayName,
     this.photoUrl,
+    this.equippedFrame,
     required this.elo,
     this.division = 'Bronze',
     required this.joinedAt,
@@ -256,6 +296,7 @@ class MatchmakingEntry {
       oderId: oderId,
       displayName: map['displayName'] ?? 'Player',
       photoUrl: map['photoUrl'],
+      equippedFrame: map['equippedFrame'] as String?,
       elo: map['elo'] ?? 450,
       division: map['division'] ?? 'Bronze',
       joinedAt: map['joinedAt'] != null
@@ -269,6 +310,7 @@ class MatchmakingEntry {
     return {
       'displayName': displayName,
       'photoUrl': photoUrl,
+      'equippedFrame': equippedFrame,
       'elo': elo,
       'division': division,
       'joinedAt': Timestamp.fromDate(joinedAt),
@@ -312,6 +354,39 @@ class EloCalculator {
   static const int kFactorNormal = 32; // Normal players
   static const int kFactorMaster = 24; // High rated players (> 2000)
 
+  // ────────────────────── ELO gain / loss bounds ──────────────────────
+  //
+  // The raw Elo formula (K * (actual - expected)) produces very small gains
+  // and very large losses once the player's rating starts to pull away from
+  // the matchmaking pool. For example at 600 ELO facing a 100 ELO opponent
+  // with K=32 and a 2× online multiplier, the raw win is only ~3 ELO while
+  // a loss is ~-61 ELO. The bounds below:
+  //
+  //  • guarantee that a win always feels like progress (minWin = 15),
+  //  • cap huge swings on both sides (max 50 win / 25 loss),
+  //  • make the system asymmetric in favour of winning so that climbing the
+  //    ladder stays rewarding even as matchmaking thins out the opponent
+  //    pool.
+  //
+  // Floors/ceilings are applied AFTER the multiplier, so the online duel
+  // vs bot match bonus still affects mid-range results but extremes stay
+  // bounded.
+
+  /// Minimum ELO gained on a win.
+  static const int minEloWin = 15;
+
+  /// Maximum ELO gained on a win.
+  static const int maxEloWin = 50;
+
+  /// Minimum ELO lost on a loss (i.e. you always lose at least this many).
+  static const int minEloLoss = 5;
+
+  /// Maximum ELO lost on a single loss.
+  static const int maxEloLoss = 25;
+
+  /// Maximum ELO swing on a draw (rarely used in this app).
+  static const int maxEloDraw = 10;
+
   /// Calculate expected score
   static double expectedScore(int playerElo, int opponentElo) {
     return 1.0 / (1.0 + pow(10.0, (opponentElo - playerElo) / 400.0));
@@ -324,6 +399,7 @@ class EloCalculator {
     required bool won,
     required int gamesPlayed,
     bool isDraw = false,
+    double multiplier = 1.0,
   }) {
     // Determine K factor
     int k;
@@ -339,8 +415,25 @@ class EloCalculator {
     final expected = expectedScore(playerElo, opponentElo);
     final actual = isDraw ? 0.5 : (won ? 1.0 : 0.0);
 
-    // Calculate new ELO
-    final change = (k * (actual - expected)).round();
+    // Calculate raw ELO change (multiplier allows online duels to give more ELO).
+    int change = (k * multiplier * (actual - expected)).round();
+
+    // Apply gain/loss bounds so that:
+    //  - winning always gives at least `minEloWin`, capped at `maxEloWin`
+    //  - losing never costs more than `maxEloLoss`, but always at least
+    //    `minEloLoss` so wins remain meaningful vs losses
+    if (isDraw) {
+      if (change > maxEloDraw) change = maxEloDraw;
+      if (change < -maxEloDraw) change = -maxEloDraw;
+    } else if (won) {
+      if (change < minEloWin) change = minEloWin;
+      if (change > maxEloWin) change = maxEloWin;
+    } else {
+      // `change` is negative on a loss (or near zero for big underdogs).
+      if (change > -minEloLoss) change = -minEloLoss;
+      if (change < -maxEloLoss) change = -maxEloLoss;
+    }
+
     final newElo = playerElo + change;
 
     // Minimum ELO is 0
@@ -354,6 +447,7 @@ class EloCalculator {
     required bool won,
     required int gamesPlayed,
     bool isDraw = false,
+    double multiplier = 1.0,
   }) {
     final newElo = calculateNewElo(
       playerElo: playerElo,
@@ -361,6 +455,7 @@ class EloCalculator {
       won: won,
       gamesPlayed: gamesPlayed,
       isDraw: isDraw,
+      multiplier: multiplier,
     );
     return newElo - playerElo;
   }

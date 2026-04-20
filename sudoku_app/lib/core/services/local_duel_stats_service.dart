@@ -12,6 +12,7 @@ class LocalDuelStatsService {
   static const String _keyLastSyncedAt = 'duel_last_synced';
 
   static SharedPreferences? _prefs;
+  static Future<void>? _initFuture; // Re-entrant guard: single init for concurrent callers
 
   // Pending ELO change for animation (in-memory only)
   static int? _pendingEloChange;
@@ -20,7 +21,11 @@ class LocalDuelStatsService {
   static String? _pendingRankUpFrom; // Previous rank (for celebration)
 
   static Future<void> init() async {
-    _prefs ??= await SharedPreferences.getInstance();
+    if (_prefs != null) return;
+    _initFuture ??= SharedPreferences.getInstance().then((p) {
+      _prefs = p;
+    });
+    await _initFuture;
   }
 
   // Getters
@@ -85,6 +90,11 @@ class LocalDuelStatsService {
       default:
         return '🎮';
     }
+  }
+
+  static String? getRankImagePath(String rank) {
+    final key = rank.toLowerCase();
+    return 'assets/divisions/$key.png';
   }
 
   // Get division color
@@ -237,7 +247,7 @@ class LocalDuelStatsService {
     // Merge: take the higher values
     final cloudWins = cloudStats['wins'] ?? 0;
     final cloudLosses = cloudStats['losses'] ?? 0;
-    final cloudElo = cloudStats['elo'] ?? 800;
+    final cloudElo = cloudStats['elo'] ?? 450;
     final cloudStreak = cloudStats['winStreak'] ?? 0;
     final cloudBestStreak = cloudStats['bestStreak'] ?? 0;
 

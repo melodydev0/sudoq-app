@@ -25,12 +25,47 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def admobProperties = new Properties()
+def admobPropertiesFile = rootProject.file('admob.properties')
+if (admobPropertiesFile.exists()) {
+    admobPropertiesFile.withReader('UTF-8') { reader ->
+        admobProperties.load(reader)
+    }
+}
+
+def isReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    def lowerTaskName = taskName.toLowerCase()
+    return lowerTaskName.contains('release') || lowerTaskName.contains('bundle')
+}
+def testAdmobAppId = 'ca-app-pub-3940256099942544~3347511713'
+def admobAppId = admobProperties.getProperty('ADMOB_APP_ID', testAdmobAppId)
+
+if (isReleaseTaskRequested && !keystorePropertiesFile.exists()) {
+    throw new RuntimeException(
+        "Missing android/key.properties for release signing. " +
+        "Create it from android/key.properties.example before publishing."
+    )
+}
+if (isReleaseTaskRequested && admobAppId == testAdmobAppId) {
+    throw new RuntimeException(
+        "Missing real AdMob App ID for release. " +
+        "Create android/admob.properties from android/admob.properties.example and fill in your IDs."
+    )
+}
+
 android {
-    namespace "com.sudoq.app"
+    namespace "com.sudoq.puzzle"
     compileSdk 36
     ndkVersion flutter.ndkVersion
 
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
@@ -44,16 +79,32 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.sudoq.app"
+        applicationId "com.sudoq.puzzle"
         minSdkVersion flutter.minSdkVersion
-        targetSdkVersion 34
+        targetSdkVersion 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        manifestPlaceholders = [
+            admobAppId: admobAppId,
+            applicationName: "android.app.Application"
+        ]
+    }
+
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+            storePassword keystoreProperties['storePassword']
+        }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
@@ -62,4 +113,6 @@ flutter {
     source '../..'
 }
 
-dependencies {}
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+}

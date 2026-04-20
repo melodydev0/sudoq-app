@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/models/cosmetic_rewards.dart';
 import '../../../../core/services/level_service.dart';
@@ -7,6 +7,7 @@ import '../../../../core/services/local_duel_stats_service.dart';
 import '../../../../core/theme/app_theme_manager.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/animated_frame.dart';
+import '../../../../core/widgets/division_badge.dart';
 
 /// Duel Rewards Screen - Shows frames and themes unlockable through duel achievements
 class DuelRewardsScreen extends StatefulWidget {
@@ -98,13 +99,11 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
     int duelWins = 0;
     int duelElo = 1000;
     String duelRank = 'Bronze';
-    String rankEmoji = '🥉';
 
     try {
       duelWins = LocalDuelStatsService.wins;
       duelElo = LocalDuelStatsService.elo;
       duelRank = LocalDuelStatsService.rank;
-      rankEmoji = LocalDuelStatsService.getRankEmoji(duelRank);
     } catch (e) {
       debugPrint('Error loading duel stats: $e');
     }
@@ -125,18 +124,41 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildStatItem(rankEmoji, duelRank, theme),
-          _buildStatItem('🏆', '$duelWins ${l10n.wins}', theme),
-          _buildStatItem('⚡', '$duelElo ELO', theme),
+          _buildDivisionStatItem(duelRank, _getLocalizedRank(duelRank, l10n), theme),
+          _buildImageStatItem('assets/divisions/trophy.png', '$duelWins ${l10n.wins}', theme),
+          _buildImageStatItem('assets/divisions/elo.png', '$duelElo ELO', theme),
         ],
       ),
     );
   }
 
-  Widget _buildStatItem(String emoji, String value, AppThemeColors theme) {
+  Widget _buildDivisionStatItem(String rank, String value, AppThemeColors theme) {
     return Column(
       children: [
-        Text(emoji, style: TextStyle(fontSize: 24.sp)),
+        DivisionBadge(rank: rank, size: 28.w),
+        SizedBox(height: 4.w),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 12.sp,
+            fontWeight: FontWeight.bold,
+            color: theme.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageStatItem(String assetPath, String value, AppThemeColors theme) {
+    return Column(
+      children: [
+        Image.asset(
+          assetPath,
+          width: 32.w,
+          height: 32.w,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => Icon(Icons.star, size: 32.w),
+        ),
         SizedBox(height: 4.w),
         Text(
           value,
@@ -246,15 +268,31 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
                       : Colors.grey.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(8.w),
                 ),
-                child: Center(
-                  child: Text(
-                    reward.previewAsset,
-                    style: TextStyle(
-                      fontSize: 28.sp,
-                      color: isUnlocked ? null : Colors.grey,
-                    ),
-                  ),
-                ),
+                child: isUnlocked && reward.imagePath != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8.w),
+                        child: Image.asset(
+                          reward.imagePath!,
+                          width: 50.w,
+                          height: 50.w,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Text(
+                              reward.previewAsset,
+                              style: TextStyle(fontSize: 28.sp),
+                            ),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          reward.previewAsset,
+                          style: TextStyle(
+                            fontSize: 28.sp,
+                            color: isUnlocked ? null : Colors.grey,
+                          ),
+                        ),
+                      ),
               ),
             SizedBox(width: 12.w),
 
@@ -408,37 +446,60 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
     }
   }
 
+  String _getLocalizedRank(String rank, AppLocalizations l10n) {
+    switch (rank.toLowerCase()) {
+      case 'bronze':
+        return l10n.bronze;
+      case 'silver':
+        return l10n.silver;
+      case 'gold':
+        return l10n.gold;
+      case 'platinum':
+        return l10n.platinum;
+      case 'diamond':
+        return l10n.diamond;
+      case 'master':
+        return l10n.master;
+      case 'grandmaster':
+        return l10n.grandmaster;
+      case 'champion':
+        return l10n.champion;
+      default:
+        return rank;
+    }
+  }
+
   String _getUnlockConditionText(CosmeticReward reward, AppLocalizations l10n) {
     final condition = reward.unlockCondition;
     if (condition == null) return '';
 
     switch (condition) {
       case 'ranked_10_wins':
-        return 'Win 10 ${l10n.duel.toLowerCase()}s';
+        return l10n.winXDuels(10);
       case 'ranked_50_wins':
-        return 'Win 50 ${l10n.duel.toLowerCase()}s';
+        return l10n.winXDuels(50);
       case 'ranked_100_wins':
-        return 'Win 100 ${l10n.duel.toLowerCase()}s';
+        return l10n.winXDuels(100);
       case 'ranked_250_wins':
-        return 'Win 250 ${l10n.duel.toLowerCase()}s';
+        return l10n.winXDuels(250);
       case 'platinum_division':
-        return 'Reach Platinum (1100 ELO)';
+        return l10n.reachRankElo(l10n.platinum, 1100);
       case 'diamond_division':
-        return 'Reach Diamond (1400 ELO)';
+        return l10n.reachRankElo(l10n.diamond, 1400);
       case 'master_division':
-        return 'Reach Master (1700 ELO)';
+        return l10n.reachRankElo(l10n.master, 1700);
       case 'grandmaster_division':
-        return 'Reach Grandmaster (2000 ELO)';
+        return l10n.reachRankElo(l10n.grandmaster, 2000);
       case 'champion_division':
-        return 'Reach Champion (2300 ELO)';
+        return l10n.reachRankElo(l10n.champion, 2300);
       case 'season_top50':
-        return 'Finish Top 50 in Season';
+        return l10n.finishTopXInSeason(50);
       case 'season_top10':
-        return 'Finish Top 10 in Season';
+        return l10n.finishTopXInSeason(10);
       case 'season_top3':
-        return 'Finish Top 3 in Season';
+        return l10n.finishTopXInSeason(3);
       case 'season_first':
-        return 'Finish #1 in Season';
+        return l10n.finishFirstInSeason;
       default:
         return condition;
     }
@@ -451,31 +512,31 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
       // Simple mapping for common reward names
       switch (nameKey) {
         case 'frameWarrior':
-          return 'Warrior Frame';
+          return l10n.frameWarrior;
         case 'frameGladiator':
-          return 'Gladiator Frame';
+          return l10n.frameGladiator;
         case 'framePlatinumRanked':
-          return 'Platinum Frame';
+          return l10n.framePlatinumRanked;
         case 'frameDiamondRanked':
-          return 'Diamond Frame';
+          return l10n.frameDiamondRanked;
         case 'frameMasterRanked':
-          return 'Master Frame';
+          return l10n.frameMasterRanked;
         case 'frameGrandmasterRanked':
-          return 'Grandmaster Frame';
+          return l10n.frameGrandmasterRanked;
         case 'frameChampionRanked':
-          return 'Champion Frame';
+          return l10n.frameChampionRanked;
         case 'frameTop50':
-          return 'Top 50 Frame';
+          return l10n.frameTop50;
         case 'framePro':
-          return 'Pro Frame';
+          return l10n.framePro;
         case 'frameElite':
-          return 'Elite Frame';
+          return l10n.frameElite;
         case 'frameLegend':
-          return 'Legend Frame';
+          return l10n.frameLegend;
         case 'themeChampion':
-          return "Champion's Glory";
+          return l10n.themeChampion;
         case 'themeGrandmaster':
-          return 'Grandmaster Prestige';
+          return l10n.themeGrandmaster;
         default:
           return nameKey;
       }
@@ -499,13 +560,13 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
   }
 
   void _selectFrame(CosmeticReward reward) {
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
     LevelService.setSelectedFrame(reward.id);
     setState(() {});
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('✓ Frame selected'),
+        content: Text('✓ ${AppLocalizations.of(context).frameEquipped}'),
         backgroundColor: AppThemeManager.colors.accent,
         duration: const Duration(milliseconds: 800),
       ),
@@ -513,7 +574,7 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
   }
 
   void _selectTheme(CosmeticReward reward) {
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
     LevelService.setSelectedTheme(reward.id);
 
     // Apply the theme to AppThemeManager
@@ -534,7 +595,7 @@ class _DuelRewardsScreenState extends State<DuelRewardsScreen>
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('✓ Theme applied'),
+        content: Text('✓ ${AppLocalizations.of(context).themeApplied}'),
         backgroundColor: AppThemeManager.colors.accent,
         duration: const Duration(milliseconds: 800),
       ),

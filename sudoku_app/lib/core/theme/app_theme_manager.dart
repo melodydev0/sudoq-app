@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 
@@ -15,9 +16,9 @@ enum AppThemeType {
 class AppThemeManager {
   static const String _themeKey = 'app_theme_type';
   static SharedPreferences? _prefs;
-  static AppThemeType _currentTheme = AppThemeType.system;
+  static AppThemeType _currentTheme = AppThemeType.light;
   static final ValueNotifier<AppThemeType> themeNotifier =
-      ValueNotifier(AppThemeType.system);
+      ValueNotifier(AppThemeType.light);
 
   /// Initialize theme manager
   static Future<void> init() async {
@@ -26,8 +27,12 @@ class AppThemeManager {
     if (savedTheme != null) {
       _currentTheme = AppThemeType.values.firstWhere(
         (t) => t.name == savedTheme,
-        orElse: () => AppThemeType.system,
+        orElse: () => AppThemeType.light,
       );
+      if (_currentTheme == AppThemeType.system) {
+        _currentTheme = AppThemeType.light;
+        await _prefs?.setString(_themeKey, AppThemeType.light.name);
+      }
     }
     themeNotifier.value = _currentTheme;
   }
@@ -60,9 +65,9 @@ class AppThemeManager {
       case AppThemeType.grandmaster:
         return _grandmasterTheme;
       case AppThemeType.system:
-        final brightness =
-            platformBrightness == true ? Brightness.dark : Brightness.light;
-        return brightness == Brightness.dark ? _darkTheme : _lightTheme;
+        final isDark = platformBrightness ??
+            (SchedulerBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
+        return isDark ? _darkTheme : _lightTheme;
     }
   }
 
@@ -78,89 +83,20 @@ class AppThemeManager {
       case AppThemeType.grandmaster:
         return AppThemeColors.grandmaster();
       case AppThemeType.system:
-        return AppThemeColors.light();
+        final brightness = SchedulerBinding.instance.platformDispatcher.platformBrightness;
+        return brightness == Brightness.dark ? AppThemeColors.dark() : AppThemeColors.light();
     }
   }
 
   // ========== THEME DATA ==========
+  // All themes build on AppTheme base to ensure M3 + full component theme consistency
 
-  static ThemeData get _lightTheme => ThemeData(
-        brightness: Brightness.light,
-        primarySwatch: Colors.indigo,
-        scaffoldBackgroundColor: const Color(0xFFF6F5F2),
-        cardColor: const Color(0xFFFDFCF9),
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFF5558A8),
-          secondary: Color(0xFF6D5B8A),
-          surface: Color(0xFFFDFCF9),
-        ),
-        cardTheme: CardThemeData(
-          elevation: 2,
-          shadowColor: const Color(0xFF2C2B30).withValues(alpha: 0.08),
-          shape:
-              const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            elevation: 1,
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
-          ),
-        ),
-      );
+  static ThemeData get _lightTheme => AppTheme.lightTheme;
 
-  static ThemeData get _darkTheme => ThemeData(
-        brightness: Brightness.dark,
-        primarySwatch: Colors.indigo,
-        scaffoldBackgroundColor: const Color(0xFF1C1B1F),
-        cardColor: const Color(0xFF252429),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF7B7EC7),
-          secondary: Color(0xFF6D5B8A),
-          surface: Color(0xFF252429),
-        ),
-        cardTheme: const CardThemeData(
-          elevation: 2,
-          shadowColor: Colors.black26,
-          shape: RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            elevation: 1,
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
-          ),
-        ),
-      );
+  static ThemeData get _darkTheme => AppTheme.darkTheme;
 
-  // Champion's Glory – handcrafted buttons & cards
-  static ThemeData get _championTheme => ThemeData(
-        brightness: Brightness.light,
-        primarySwatch: Colors.amber,
+  // Champion's Glory – warm gold, inherits full M3 theme from AppTheme.lightTheme
+  static ThemeData get _championTheme => AppTheme.lightTheme.copyWith(
         scaffoldBackgroundColor: const Color(0xFFFFFDF5),
         cardColor: const Color(0xFFFFFEFA),
         colorScheme: const ColorScheme.light(
@@ -169,38 +105,43 @@ class AppThemeManager {
           surface: Color(0xFFFFFEFA),
           onPrimary: Colors.white,
           onSurface: Color(0xFF5D4E37),
+          error: Color(0xFFD32F2F),
+          onError: Colors.white,
         ),
         cardTheme: CardThemeData(
           elevation: 2,
           shadowColor: const Color(0xFF5D4E37).withValues(alpha: 0.12),
-          shape:
-              const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+          shape: const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF8A6800),
+            foregroundColor: Colors.white,
             elevation: 1,
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+            shape: const RoundedRectangleBorder(borderRadius: AppTheme.buttonRadius),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF8A6800),
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+            shape: const RoundedRectangleBorder(borderRadius: AppTheme.buttonRadius),
+            side: const BorderSide(color: Color(0xFF8A6800)),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFF8A6800),
+            textStyle: const TextStyle(letterSpacing: 0.3),
           ),
         ),
       );
 
-  // Grandmaster Prestige – handcrafted buttons & cards
-  static ThemeData get _grandmasterTheme => ThemeData(
-        brightness: Brightness.light,
-        primarySwatch: Colors.deepPurple,
+  // Grandmaster Prestige – violet, inherits full M3 theme from AppTheme.lightTheme
+  static ThemeData get _grandmasterTheme => AppTheme.lightTheme.copyWith(
         scaffoldBackgroundColor: const Color(0xFFF8F7FC),
         cardColor: const Color(0xFFFDFCFF),
         colorScheme: const ColorScheme.light(
@@ -209,30 +150,37 @@ class AppThemeManager {
           surface: Color(0xFFFDFCFF),
           onPrimary: Colors.white,
           onSurface: Color(0xFF3D3551),
+          error: Color(0xFFD32F2F),
+          onError: Colors.white,
         ),
         cardTheme: CardThemeData(
           elevation: 2,
           shadowColor: const Color(0xFF3D3551).withValues(alpha: 0.1),
-          shape:
-              const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+          shape: const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF6A35AD),
+            foregroundColor: Colors.white,
             elevation: 1,
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+            shape: const RoundedRectangleBorder(borderRadius: AppTheme.buttonRadius),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF6A35AD),
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-            shape: const RoundedRectangleBorder(
-                borderRadius: AppTheme.buttonRadius),
-            textStyle: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+            shape: const RoundedRectangleBorder(borderRadius: AppTheme.buttonRadius),
+            side: const BorderSide(color: Color(0xFF6A35AD)),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFF6A35AD),
+            textStyle: const TextStyle(letterSpacing: 0.3),
           ),
         ),
       );
@@ -338,25 +286,25 @@ class AppThemeColors {
         cardBorder: Color(0xFF3A393E),
         cardShadow: Color(0x40000000),
         textPrimary: Color(0xFFE8E6E3),
-        textSecondary: Color(0xFFA8A6A3),
-        textMuted: Color(0xFF6E6D72),
-        accent: Color(0xFF7B7EC7),
-        accentSecondary: Color(0xFF6D5B8A),
+        textSecondary: Color(0xFFB0AEA9),
+        textMuted: Color(0xFF908F94),
+        accent: Color(0xFF9496D8),
+        accentSecondary: Color(0xFF8574A4),
         accentLight: Color(0xFF35343A),
-        buttonPrimary: Color(0xFF7B7EC7),
+        buttonPrimary: Color(0xFF6568BC),
         buttonSecondary: Color(0xFF35343A),
         buttonText: Color(0xFFFFFFFF),
-        iconPrimary: Color(0xFF7B7EC7),
-        iconSecondary: Color(0xFFA8A6A3),
+        iconPrimary: Color(0xFF9496D8),
+        iconSecondary: Color(0xFFB0AEA9),
         highlight: Color(0xFF35343A),
-        success: Color(0xFF2E8B6C),
-        warning: Color(0xFFD4942E),
+        success: Color(0xFF4CAF82),
+        warning: Color(0xFFE8A840),
         divider: Color(0xFF3A393E),
         shimmer: Color(0xFF3A393E),
         progressBackground: Color(0xFF3A393E),
         navBarBackground: Color(0xFF252429),
-        navBarSelected: Color(0xFF7B7EC7),
-        navBarUnselected: Color(0xFFA8A6A3),
+        navBarSelected: Color(0xFF9496D8),
+        navBarUnselected: Color(0xFFB0AEA9),
         isDark: true,
       );
 
@@ -368,26 +316,26 @@ class AppThemeColors {
         card: Color(0xFFFFFCF0),
         cardBorder: Color(0xFFDAA520),
         cardShadow: Color(0x40DAA520),
-        textPrimary: Color(0xFF5D4E37),
-        textSecondary: Color(0xFF8B6914),
-        textMuted: Color(0xFFA68B3D),
-        accent: Color(0xFFDAA520),
-        accentSecondary: Color(0xFFFFD700),
+        textPrimary: Color(0xFF4A3C26),
+        textSecondary: Color(0xFF6D5210),
+        textMuted: Color(0xFF7E6720),
+        accent: Color(0xFF8E6C00),
+        accentSecondary: Color(0xFF9A7400),
         accentLight: Color(0xFFFFE680),
-        buttonPrimary: Color(0xFFDAA520),
+        buttonPrimary: Color(0xFF8A6800),
         buttonSecondary: Color(0xFFFFE066),
-        buttonText: Color(0xFF3D2E1A),
-        iconPrimary: Color(0xFFDAA520),
-        iconSecondary: Color(0xFFB8960B),
+        buttonText: Color(0xFFFFFFFF),
+        iconPrimary: Color(0xFF8E6C00),
+        iconSecondary: Color(0xFF7E6720),
         highlight: Color(0xFFFFE680),
-        success: Color(0xFF7CB342),
-        warning: Color(0xFFFF8F00),
+        success: Color(0xFF4A7A2E),
+        warning: Color(0xFFB84600),
         divider: Color(0xFFE6C866),
         shimmer: Color(0xFFFFD700),
         progressBackground: Color(0xFFDAC280),
         navBarBackground: Color(0xFFFFF4CC),
-        navBarSelected: Color(0xFFDAA520),
-        navBarUnselected: Color(0xFFA68B3D),
+        navBarSelected: Color(0xFF8A6800),
+        navBarUnselected: Color(0xFF7E6720),
         isDark: false,
       );
 
@@ -397,28 +345,28 @@ class AppThemeColors {
         backgroundGradientStart: Color(0xFFE8DEFF),
         backgroundGradientEnd: Color(0xFFD4C4F0),
         card: Color(0xFFF8F4FF),
-        cardBorder: Color(0xFF9C6ADE),
-        cardShadow: Color(0x409C6ADE),
-        textPrimary: Color(0xFF3D2E5A),
-        textSecondary: Color(0xFF6B4D9E),
-        textMuted: Color(0xFF8E72B8),
-        accent: Color(0xFF9C6ADE),
-        accentSecondary: Color(0xFFB388FF),
+        cardBorder: Color(0xFF7E49C4),
+        cardShadow: Color(0x407E49C4),
+        textPrimary: Color(0xFF2D1F4A),
+        textSecondary: Color(0xFF553D85),
+        textMuted: Color(0xFF7559A0),
+        accent: Color(0xFF7540B8),
+        accentSecondary: Color(0xFF9060D0),
         accentLight: Color(0xFFD4BFFF),
-        buttonPrimary: Color(0xFF9C6ADE),
+        buttonPrimary: Color(0xFF6A35AD),
         buttonSecondary: Color(0xFFD4BFFF),
         buttonText: Color(0xFFFFFFFF),
-        iconPrimary: Color(0xFF9C6ADE),
-        iconSecondary: Color(0xFF7E57C2),
+        iconPrimary: Color(0xFF7540B8),
+        iconSecondary: Color(0xFF7559A0),
         highlight: Color(0xFFE8DEFF),
-        success: Color(0xFF66BB6A),
-        warning: Color(0xFFFFAB40),
+        success: Color(0xFF2E7D32),
+        warning: Color(0xFFC23510),
         divider: Color(0xFFC9A8FF),
         shimmer: Color(0xFFB388FF),
         progressBackground: Color(0xFFBFA8E0),
         navBarBackground: Color(0xFFE8DEFF),
-        navBarSelected: Color(0xFF9C6ADE),
-        navBarUnselected: Color(0xFF8E72B8),
+        navBarSelected: Color(0xFF6A35AD),
+        navBarUnselected: Color(0xFF7559A0),
         isDark: false,
       );
 

@@ -1,8 +1,7 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../../../../core/services/haptic_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/models/game_state.dart';
 import '../../../../core/services/storage_service.dart';
@@ -26,6 +25,11 @@ import '../../../../core/utils/responsive_utils.dart';
 import '../../../subscription/presentation/screens/subscription_screen.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
 import '../widgets/sudoku_grid.dart';
+import '../widgets/game_top_bar.dart';
+import '../widgets/game_info_bar.dart';
+import '../widgets/auto_complete_button.dart';
+import '../widgets/game_action_bar.dart';
+import '../widgets/game_number_pad.dart';
 
 class GameScreen extends ConsumerStatefulWidget {
   final String? difficulty;
@@ -56,6 +60,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
   Duration _elapsedTime = Duration.zero;
   int _secondChancesUsed = 0; // Track how many times user used second chance
 
+  // Track wrong attempts per cell: cellIndex → set of wrong numbers tried
+  final Map<int, Set<int>> _wrongAttempts = {};
+
   // Celebration effect state
   final List<_CelebrationData> _celebrations = [];
   final GlobalKey _gridKey = GlobalKey();
@@ -71,6 +78,14 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
   // Fast Pencil toggle state
   bool _fastPencilEnabled = false;
+
+  // Auto-complete overlay button
+  bool _showAutoCompleteBtn = false;
+  Set<int> _droppingCells = {};
+
+  // Board completion effect (shown after auto-complete before game complete flow)
+  bool _showBoardCompletion = false;
+  Rect? _boardCompletionRect;
 
   @override
   void initState() {
@@ -170,7 +185,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _selectedRow = row;
       _selectedCol = col;
     });
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
   }
 
   void _onNumberSelected(int number) {
@@ -217,7 +232,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _setCell(row, col, number);
     }
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   void _setCell(int row, int col, int number) {
@@ -242,11 +257,32 @@ class _GameScreenState extends ConsumerState<GameScreen>
     final now = DateTime.now();
 
     if (!isCorrect) {
+      final cellIndex = row * _gameState.gridSize + col;
+      _wrongAttempts[cellIndex] ??= {};
+
+      if (_wrongAttempts[cellIndex]!.contains(number)) {
+        // Already tried this wrong number in this cell — warn, don't count mistake
+        HapticService.lightImpact();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.of(context).alreadyTriedWrong),
+              duration: const Duration(seconds: 1),
+              backgroundColor: Colors.orange.shade700,
+            ),
+          );
+        }
+        return;
+      }
+
+      _wrongAttempts[cellIndex]!.add(number);
       newMistakes++;
       newCombo = 0; // Reset combo on mistake
-      HapticFeedback.heavyImpact();
+      HapticService.heavyImpact();
       SoundService().playWrongInput();
     } else {
+      // Clear wrong attempts for this cell on correct entry
+      _wrongAttempts.remove(row * _gameState.gridSize + col);
       // Play correct input sound
       SoundService().playCorrectInput();
 
@@ -273,9 +309,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
       // Haptic feedback based on combo
       if (newCombo >= 5) {
-        HapticFeedback.heavyImpact();
+        HapticService.heavyImpact();
       } else {
-        HapticFeedback.mediumImpact();
+        HapticService.mediumImpact();
       }
 
       // Check for combo milestone (3, 5, 7, 10, 15, 20, 25...)
@@ -332,6 +368,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _onGameOver();
     } else if (_checkCompletion(newGrid)) {
       _onGameComplete();
+    } else {
+      _checkAutoComplete();
     }
   }
 
@@ -344,6 +382,100 @@ class _GameScreenState extends ConsumerState<GameScreen>
       }
     }
     return true;
+  }
+
+  void _checkAutoComplete() {
+    if (_gameState.isCompleted) return;
+    int remainingEmpty = 0;
+    for (int r = 0; r < _gameState.gridSize; r++) {
+      for (int c = 0; c < _gameState.gridSize; c++) {
+        if (_gameState.puzzle[r][c] == 0 &&
+            _gameState.currentGrid[r][c] != _gameState.solution[r][c]) {
+          remainingEmpty++;
+        }
+      }
+    }
+    final shouldShow = remainingEmpty > 0 && remainingEmpty <= 5;
+    if (shouldShow != _showAutoCompleteBtn) {
+      setState(() => _showAutoCompleteBtn = shouldShow);
+    }
+  }
+
+  Future<void> _onAutoComplete() async {
+    // Collect empty cells that need filling
+    final emptyCells = <(int, int)>[];
+    for (int r = 0; r < _gameState.gridSize; r++) {
+      for (int c = 0; c < _gameState.gridSize; c++) {
+        if (_gameState.puzzle[r][c] == 0 &&
+            _gameState.currentGrid[r][c] == 0) {
+          emptyCells.add((r, c));
+        }
+      }
+    }
+
+    // Capture grid rect before we start modifying state
+    final gridBox = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    final boardRect = gridBox != null
+        ? (gridBox.localToGlobal(Offset.zero) & gridBox.size)
+        : null;
+
+    setState(() => _showAutoCompleteBtn = false);
+
+    // Play completion sound immediately so user hears it right away
+    SoundService().playGameComplete();
+    HapticService.heavyImpact();
+
+    // Build a mutable working grid
+    final workingGrid =
+        _gameState.currentGrid.map((r) => List<int>.from(r)).toList();
+
+    // Fill cells one-by-one with staggered drop animation
+    const delayPerCell = Duration(milliseconds: 50);
+    for (int i = 0; i < emptyCells.length; i++) {
+      final (r, c) = emptyCells[i];
+      workingGrid[r][c] = _gameState.solution[r][c];
+      final cellKey = r * _gameState.gridSize + c;
+
+      if (!mounted) return;
+      setState(() {
+        _gameState = _gameState.copyWith(
+          currentGrid:
+              workingGrid.map((row) => List<int>.from(row)).toList(),
+        );
+        _droppingCells = {..._droppingCells, cellKey};
+      });
+
+      if (i % 6 == 0) HapticService.lightImpact();
+      await Future.delayed(delayPerCell);
+    }
+
+    // Brief wait for last drop animation then show board completion
+    await Future.delayed(const Duration(milliseconds: 150));
+    if (!mounted) return;
+
+    setState(() {
+      _droppingCells = {};
+      if (boardRect != null) {
+        _boardCompletionRect = boardRect;
+        _showBoardCompletion = true;
+      }
+    });
+
+    if (boardRect == null) _onGameComplete();
+    // Otherwise _onGameComplete is called by BoardCompletionEffect.onComplete
+  }
+
+  Widget _buildAutoCompleteButton(AppLocalizations l10n) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1.0, end: 0.0),
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) => Transform.translate(
+        offset: Offset(80 * value, 0),
+        child: child,
+      ),
+      child: AutoCompleteButton(l10n: l10n, onTap: _onAutoComplete),
+    );
   }
 
   /// Remove wrong instances of a number in same row, column, and box
@@ -440,7 +572,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           index: row,
           completedAt: now,
         ));
-        HapticFeedback.mediumImpact();
+        HapticService.mediumImpact();
         SoundService().playRowComplete();
       }
     }
@@ -455,7 +587,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           index: col,
           completedAt: now,
         ));
-        HapticFeedback.mediumImpact();
+        HapticService.mediumImpact();
         SoundService().playColumnComplete();
       }
     }
@@ -471,7 +603,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           index: boxIndex,
           completedAt: now,
         ));
-        HapticFeedback.heavyImpact();
+        HapticService.heavyImpact();
         SoundService().playBoxComplete();
       }
     }
@@ -553,6 +685,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
       newGrid[row][col] = 0;
     }
 
+    // Play note toggle sound
+    SoundService().playHintFastPencil();
+
     setState(() {
       _gameState = _gameState.copyWith(
         currentGrid: newGrid,
@@ -599,7 +734,20 @@ class _GameScreenState extends ConsumerState<GameScreen>
     }
 
     final moves = List<GameMove>.from(_gameState.moveHistory);
-    final lastMove = moves.removeLast();
+    final lastMove = moves.last;
+
+    // Block undo for correctly placed numbers
+    if (lastMove.type == MoveType.setValue &&
+        lastMove.newValue == _gameState.solution[lastMove.row][lastMove.col]) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(l10n.cantUndoCorrect),
+            duration: const Duration(seconds: 1)),
+      );
+      return;
+    }
+
+    moves.removeLast();
 
     final newGrid =
         _gameState.currentGrid.map((r) => List<int>.from(r)).toList();
@@ -613,10 +761,6 @@ class _GameScreenState extends ConsumerState<GameScreen>
     }
 
     final newConfirmed = Set<int>.from(_gameState.confirmedCorrectCells);
-    if (lastMove.type == MoveType.setValue &&
-        lastMove.newValue == _gameState.solution[lastMove.row][lastMove.col]) {
-      newConfirmed.remove(lastMove.row * _gameState.gridSize + lastMove.col);
-    }
 
     setState(() {
       _gameState = _gameState.copyWith(
@@ -629,7 +773,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _selectedCol = lastMove.col;
     });
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   void _onErase() {
@@ -676,6 +820,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
     newGrid[row][col] = 0;
     newNotes[row][col].clear();
 
+    // Clear wrong attempts for this cell when erased
+    _wrongAttempts.remove(row * _gameState.gridSize + col);
+
     final move = GameMove(
       row: row,
       col: col,
@@ -693,23 +840,35 @@ class _GameScreenState extends ConsumerState<GameScreen>
       );
     });
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
   }
 
   void _onHint() async {
     // Play hint button sound
     SoundService().playHintFastPencil();
 
+    // Both free and premium users are limited to maxHints per game
+    if (_gameState.hintsUsed >= AppConstants.maxHints) {
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.noHintsRemaining),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     final isAdsFree = ref.read(adsFreeProvider);
 
-    // Premium users have unlimited hints
+    // Premium users can use hints freely up to maxHints
     if (isAdsFree) {
       _useHint();
       return;
     }
 
-    // Free users: Check if hints are exhausted - show options dialog
-    if (_gameState.hintsUsed >= AppConstants.maxHints) {
+    // Free users: after freeHintsWithoutAd, must watch ad for each additional hint
+    if (_gameState.hintsUsed >= AppConstants.freeHintsWithoutAd) {
       _showHintOptionsDialog();
       return;
     }
@@ -890,7 +1049,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                         ],
                       ),
                       child: Text(
-                        'BEST',
+                        l10n.bestBadge,
                         style: TextStyle(
                           fontSize: 9.sp,
                           fontWeight: FontWeight.w700,
@@ -909,7 +1068,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
-              'Cancel',
+              l10n.cancel,
               style: TextStyle(
                   color: theme.textSecondary,
                   fontSize: 14.sp,
@@ -947,15 +1106,29 @@ class _GameScreenState extends ConsumerState<GameScreen>
     if (mounted) Navigator.pop(context);
 
     if (adCompleted) {
+      // Re-check limit — user might have reached maxHints while the ad was playing
+      if (_gameState.hintsUsed >= AppConstants.maxHints) {
+        if (mounted) {
+          final l10n = AppLocalizations.of(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(l10n.noHintsRemaining),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
       _useHint();
       if (mounted) {
+        final snackL10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Row(
               children: [
-                Icon(Icons.lightbulb, color: Colors.white),
-                SizedBox(width: 8),
-                Text('Hint used! Thanks for watching the ad.'),
+                const Icon(Icons.lightbulb, color: Colors.white),
+                const SizedBox(width: 8),
+                Text(snackL10n.hintUsedThanks),
               ],
             ),
             backgroundColor: Colors.green,
@@ -964,9 +1137,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
       }
     } else {
       if (mounted) {
+        final snackL10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ad not completed. Please try again.'),
+          SnackBar(
+            content: Text(snackL10n.adNotCompleted),
             backgroundColor: Colors.orange,
           ),
         );
@@ -1070,14 +1244,14 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _onGameComplete();
     }
 
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
   }
 
   void _togglePencilMode() {
     setState(() {
       _isPencilMode = !_isPencilMode;
     });
-    HapticFeedback.selectionClick();
+    HapticService.selectionClick();
   }
 
   /// Fast Pencil - Toggle ON/OFF
@@ -1135,18 +1309,19 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _fastPencilEnabled = true;
     });
 
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
+    final snackL10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Row(
           children: [
-            Icon(Icons.flash_on, color: Colors.white),
-            SizedBox(width: 8),
-            Text('Fast Pencil ON'),
+            const Icon(Icons.flash_on, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(snackL10n.fastPencilOn),
           ],
         ),
         backgroundColor: Colors.green,
-        duration: Duration(seconds: 1),
+        duration: const Duration(seconds: 1),
       ),
     );
   }
@@ -1165,18 +1340,19 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _fastPencilEnabled = false;
     });
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
+    final snackL10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Row(
           children: [
-            Icon(Icons.flash_off, color: Colors.white),
-            SizedBox(width: 8),
-            Text('Fast Pencil OFF'),
+            const Icon(Icons.flash_off, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(snackL10n.fastPencilOff),
           ],
         ),
         backgroundColor: Colors.orange,
-        duration: Duration(seconds: 1),
+        duration: const Duration(seconds: 1),
       ),
     );
   }
@@ -1328,7 +1504,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                             ),
                           ),
                           Text(
-                            'Unlimited Fast Pencil',
+                            l10n.unlimitedFastPencil,
                             style: TextStyle(
                               fontSize: 11.sp,
                               color: theme.buttonText.withValues(alpha: 0.9),
@@ -1353,7 +1529,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                         ],
                       ),
                       child: Text(
-                        'BEST',
+                        l10n.bestBadge,
                         style: TextStyle(
                           fontSize: 9.sp,
                           fontWeight: FontWeight.w700,
@@ -1372,7 +1548,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
-              'Cancel',
+              l10n.cancel,
               style: TextStyle(
                   color: theme.textSecondary,
                   fontSize: 14.sp,
@@ -1414,8 +1590,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ad not completed. Please try again.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context).adNotCompleted),
             backgroundColor: Colors.orange,
           ),
         );
@@ -1449,14 +1625,19 @@ class _GameScreenState extends ConsumerState<GameScreen>
     return true;
   }
 
-  void _onGameComplete() async {
+  void _onGameComplete({bool skipSound = false}) async {
     _timer?.cancel();
     // Mark completed so _saveGame() (e.g. in dispose) won't re-persist this game
     _gameState = _gameState.copyWith(isCompleted: true);
     await StorageService.clearCurrentGame();
 
-    // Play game complete celebration sound
-    SoundService().playGameComplete();
+    if (!skipSound) {
+      // Play game complete celebration sound
+      SoundService().playGameComplete();
+      // Brief pause so the game_complete sound has time to start before
+      // the async operations below trigger navigation to the result screen
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
 
     final bonusScore = _gameState.mistakes == 0 ? 100 : 0;
     final finalScore = _gameState.score + bonusScore;
@@ -1522,10 +1703,11 @@ class _GameScreenState extends ConsumerState<GameScreen>
         achievementResult: achievementResult,
         previousLevelData: previousLevelData,
       );
-    } else {
-      // Premium users - add XP directly
+    } else if (mounted) {
+      // Premium users get 2x XP automatically
       await _finalizeGameComplete(
-        xpMultiplier: 1.0,
+        xpMultiplier: 2.0,
+        isPremiumXpBoost: true,
         achievementResult: achievementResult,
         previousLevelData: previousLevelData,
         finalScore: finalScore,
@@ -1543,6 +1725,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     required UserLevelData previousLevelData,
   }) {
     final totalXp = previewXp + achievementXp;
+    final l10n = AppLocalizations.of(context);
 
     showDialog(
       context: context,
@@ -1566,7 +1749,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Double Your XP!',
+                l10n.doubleYourXp,
                 style: TextStyle(fontSize: 20.sp),
               ),
             ),
@@ -1587,7 +1770,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Game XP'),
+                      Text(l10n.gameXp),
                       Text('+$previewXp',
                           style: const TextStyle(fontWeight: FontWeight.bold)),
                     ],
@@ -1597,7 +1780,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Achievement Bonus'),
+                        Text(l10n.achievementBonus),
                         Text('+$achievementXp',
                             style: TextStyle(
                                 color: Colors.purple.shade600,
@@ -1609,8 +1792,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Total',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(l10n.total,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
                       Text('+$totalXp XP',
                           style: const TextStyle(fontWeight: FontWeight.bold)),
                     ],
@@ -1649,7 +1832,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Watch Ad for 2x XP',
+                            l10n.watchAdFor2xXp,
                             style: TextStyle(
                               fontSize: 16.sp,
                               fontWeight: FontWeight.bold,
@@ -1657,7 +1840,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                             ),
                           ),
                           Text(
-                            'Get +${totalXp * 2} XP instead!',
+                            l10n.getXpInstead(totalXp * 2),
                             style: TextStyle(
                               fontSize: 14.sp,
                               color: Colors.white.withValues(alpha: 0.9),
@@ -1702,7 +1885,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                 );
               },
               child: Text(
-                'No thanks, continue with +$totalXp XP',
+                l10n.noThanksXp(totalXp),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13.sp),
               ),
             ),
@@ -1766,9 +1949,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
     required AchievementCheckResult achievementResult,
     required UserLevelData previousLevelData,
     required int finalScore,
+    bool isPremiumXpBoost = false,
   }) async {
     // Calculate and add XP with multiplier
-    var newLevelData = await LevelService.addGameXp(
+    final gameXpResult = await LevelService.addGameXp(
       difficulty: _gameState.difficulty,
       completionTime: _elapsedTime,
       mistakes: _gameState.mistakes,
@@ -1779,6 +1963,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
       fastSolves: _gameState.fastSolves,
       performanceMultiplier: xpMultiplier,
     );
+    var newLevelData = gameXpResult.levelData;
+    final dailyStreakXp = gameXpResult.dailyStreakXp;
 
     // Add achievement XP bonus if any (also multiplied)
     if (achievementResult.totalXpBonus > 0) {
@@ -1788,6 +1974,28 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     // Calculate total XP earned (game + achievements)
     final xpEarned = newLevelData.totalXp - previousLevelData.totalXp;
+
+    // Build the XP breakdown now (before the async ad gap) so the
+    // LevelProgressScreen can animate each source row individually.
+    var gameXpBreakdown = XpMultipliers.getXpBreakdown(
+      difficulty: _gameState.difficulty,
+      completionTime: _elapsedTime,
+      mistakes: _gameState.mistakes,
+      isDailyChallenge: widget.isDailyChallenge,
+      isRanked: false,
+      streakDays: previousLevelData.streakDays,
+      score: finalScore,
+      maxCombo: _gameState.maxCombo,
+      fastSolves: _gameState.fastSolves,
+    );
+
+    // Add daily streak bonus as a separate breakdown row if awarded today
+    if (dailyStreakXp > 0) {
+      gameXpBreakdown = [
+        ...gameXpBreakdown,
+        GameXpBreakdownEntry('streak_daily', dailyStreakXp),
+      ];
+    }
 
     // Sync to cloud (if logged in)
     UserSyncService.syncToCloud();
@@ -1801,6 +2009,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
         newAchievements: achievementResult.newlyUnlocked,
         achievementXp: (achievementResult.totalXpBonus * xpMultiplier).round(),
         xpBoostMultiplier: xpMultiplier,
+        isPremiumXpBoost: isPremiumXpBoost,
+        gameXpBreakdown: gameXpBreakdown,
       );
     });
   }
@@ -1812,6 +2022,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
     List<Achievement> newAchievements = const [],
     int achievementXp = 0,
     double xpBoostMultiplier = 1.0,
+    bool isPremiumXpBoost = false,
+    List<GameXpBreakdownEntry> gameXpBreakdown = const [],
   }) {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -1827,6 +2039,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
           newAchievements: newAchievements,
           achievementXp: achievementXp,
           xpBoostMultiplier: xpBoostMultiplier,
+          isPremiumXpBoost: isPremiumXpBoost,
+          gameXpBreakdown: gameXpBreakdown,
           onContinue: () {
             Navigator.of(context).pop();
           },
@@ -1837,17 +2051,28 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
   void _onGameOver() {
     _timer?.cancel();
-    // Show second chance dialog instead of game over
+    final isPremium = StorageService.isAdsFree();
+    final maxChances = isPremium
+        ? AppConstants.maxSecondChancesPremium
+        : AppConstants.maxSecondChancesFree;
+    if (_secondChancesUsed >= maxChances) {
+      _finalizeGameOver();
+      return;
+    }
     _showSecondChanceDialog();
   }
 
   /// Show dialog offering second chance by watching ad OR becoming VIP – premium handcrafted style
-  void _showSecondChanceDialog() async {
-    final isAvailable = await AdsService.isSecondChanceAvailable();
-    final remaining = await AdsService.getSecondChanceRemaining();
+  void _showSecondChanceDialog() {
+    final isPremium = StorageService.isAdsFree();
+    final maxChances = isPremium
+        ? AppConstants.maxSecondChancesPremium
+        : AppConstants.maxSecondChancesFree;
+    final remainingChances = maxChances - _secondChancesUsed;
 
     if (!mounted) return;
 
+    final l10n = AppLocalizations.of(context);
     final theme = AppThemeManager.colors;
     showDialog(
       context: context,
@@ -1868,7 +2093,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Out of Lives!',
+                l10n.outOfLives,
                 style: TextStyle(
                   fontSize: 20.sp,
                   fontWeight: FontWeight.w600,
@@ -1882,7 +2107,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'You made 3 mistakes. But don\'t give up!',
+              l10n.outOfLivesMessage,
               style: TextStyle(
                 fontSize: 15.sp,
                 color: theme.textSecondary,
@@ -1892,8 +2117,68 @@ class _GameScreenState extends ConsumerState<GameScreen>
             ),
             const SizedBox(height: 20),
 
-            // Watch Ad option (if available)
-            if (isAvailable)
+            // Premium: instant free second chance (no ad)
+            if (isPremium)
+              GestureDetector(
+                onTap: () {
+                  Navigator.pop(context);
+                  _grantSecondChance();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentGold.withValues(alpha: 0.12),
+                    borderRadius: AppTheme.buttonRadius,
+                    border: Border.all(
+                        color: AppColors.accentGold.withValues(alpha: 0.5),
+                        width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.textPrimary.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.workspace_premium,
+                          color: AppColors.accentGold, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.premiumFreeSecondChance,
+                              style: TextStyle(
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.3,
+                                color: theme.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              l10n.secondChancesRemaining(remainingChances, maxChances),
+                              style: TextStyle(
+                                fontSize: 12.sp,
+                                color: theme.textSecondary,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.arrow_forward_ios,
+                          color: theme.textSecondary, size: 16),
+                    ],
+                  ),
+                ),
+              ),
+
+            // Watch Ad option (free users only)
+            if (!isPremium)
               GestureDetector(
                 onTap: () {
                   Navigator.pop(context);
@@ -1925,7 +2210,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Watch Ad',
+                              l10n.watchAd,
                               style: TextStyle(
                                 fontSize: 16.sp,
                                 fontWeight: FontWeight.w600,
@@ -1934,7 +2219,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                               ),
                             ),
                             Text(
-                              'Get a second chance! ($remaining left today)',
+                              l10n.getSecondChancePerGame(remainingChances),
                               style: TextStyle(
                                 fontSize: 12.sp,
                                 color: theme.textSecondary,
@@ -1951,138 +2236,97 @@ class _GameScreenState extends ConsumerState<GameScreen>
                 ),
               ),
 
-            // Daily limit reached message
-            if (!isAvailable && !StorageService.isAdsFree())
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: theme.accentLight,
-                  borderRadius: AppTheme.buttonRadius,
-                  border: Border.all(color: theme.divider),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.timer_off, color: theme.textSecondary, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Daily Limit Reached',
-                            style: TextStyle(
-                              fontSize: 15.sp,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.25,
-                              color: theme.textPrimary,
-                            ),
-                          ),
-                          Text(
-                            'Second chances reset tomorrow',
-                            style: TextStyle(
-                              fontSize: 12.sp,
-                              color: theme.textSecondary,
-                              letterSpacing: 0.2,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
             const SizedBox(height: 12),
 
-            // Become VIP option
-            GestureDetector(
-              onTap: () async {
-                Navigator.pop(context);
-                final result = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const SubscriptionScreen(),
-                  ),
-                );
+            // Become VIP option (free users only)
+            if (!isPremium)
+              GestureDetector(
+                onTap: () async {
+                  Navigator.pop(context);
+                  final result = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SubscriptionScreen(),
+                    ),
+                  );
 
-                if (result == true) {
-                  _grantSecondChance();
-                } else {
-                  _showSecondChanceDialog();
-                }
-              },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: theme.buttonPrimary,
-                  borderRadius: AppTheme.cardRadius,
-                  boxShadow: [
-                    BoxShadow(
-                      color: theme.textPrimary.withValues(alpha: 0.12),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.workspace_premium,
-                        color: theme.buttonText, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Become VIP',
-                            style: TextStyle(
-                              fontSize: 16.sp,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.3,
-                              color: theme.buttonText,
-                            ),
-                          ),
-                          Text(
-                            'Unlimited lives, hints & more!',
-                            style: TextStyle(
-                              fontSize: 12.sp,
-                              color: theme.buttonText.withValues(alpha: 0.9),
-                              letterSpacing: 0.2,
-                            ),
-                          ),
-                        ],
+                  if (result == true) {
+                    _grantSecondChance();
+                  } else {
+                    _showSecondChanceDialog();
+                  }
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: theme.buttonPrimary,
+                    borderRadius: AppTheme.cardRadius,
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.textPrimary.withValues(alpha: 0.12),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.accentGold,
-                        borderRadius: AppTheme.buttonRadius,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.accentGold.withValues(alpha: 0.3),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        'BEST',
-                        style: TextStyle(
-                          fontSize: 10.sp,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
-                          color: Colors.white,
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.workspace_premium,
+                          color: theme.buttonText, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.becomeVip,
+                              style: TextStyle(
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.3,
+                                color: theme.buttonText,
+                              ),
+                            ),
+                            Text(
+                              l10n.secondChancesAndMore,
+                              style: TextStyle(
+                                fontSize: 12.sp,
+                                color: theme.buttonText.withValues(alpha: 0.9),
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentGold,
+                          borderRadius: AppTheme.buttonRadius,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.accentGold.withValues(alpha: 0.3),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          l10n.bestBadge,
+                          style: TextStyle(
+                            fontSize: 10.sp,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
             const SizedBox(height: 16),
 
@@ -2109,10 +2353,14 @@ class _GameScreenState extends ConsumerState<GameScreen>
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _finalizeGameOver();
+              // Delay to let the dialog dismiss animation finish before
+              // showing the game over dialog — prevents visual overlap artifact
+              Future.delayed(const Duration(milliseconds: 250), () {
+                if (mounted) _finalizeGameOver();
+              });
             },
             child: Text(
-              'Give Up',
+              l10n.giveUp,
               style: TextStyle(
                 color: theme.textSecondary,
                 fontSize: 14.sp,
@@ -2167,8 +2415,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
             _grantSecondChance();
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Please watch the full ad to continue.'),
+              SnackBar(
+                content: Text(AppLocalizations.of(context).watchFullAdToContinue),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -2211,17 +2459,18 @@ class _GameScreenState extends ConsumerState<GameScreen>
     _startTimer();
 
     if (mounted) {
+      final snackL10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Row(
             children: [
-              Icon(Icons.favorite, color: Colors.white),
-              SizedBox(width: 8),
-              Text('Second chance granted! You have 1 life remaining.'),
+              const Icon(Icons.favorite, color: Colors.white),
+              const SizedBox(width: 8),
+              Text(snackL10n.secondChanceGranted),
             ],
           ),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -2230,6 +2479,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
   /// Finalize game over after user chooses to give up
   void _finalizeGameOver() {
     StorageService.clearCurrentGame();
+
+    SoundService().playGameLost();
 
     ref.read(statisticsProvider.notifier).recordGameLost(
           difficulty: _gameState.difficulty,
@@ -2241,23 +2492,44 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
   void _showCompleteDialog({required bool won, required int score}) {
     final l10n = AppLocalizations.of(context);
+    final theme = AppThemeManager.colors;
     showDialog(
       context: context,
       barrierDismissible: false,
+      barrierColor: Colors.black54,
+      useRootNavigator: true,
+      // Removed `clipBehavior: Clip.antiAlias`: it interacts badly with the
+      // Material dialog scale animation on some Android builds (MIUI /
+      // Android 14+), producing a triangular "folded-corner" artifact when
+      // the dialog first appears. The rounded shape from
+      // `RoundedRectangleBorder` already clips the dialog surface correctly.
       builder: (context) => AlertDialog(
+        backgroundColor: theme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            Icon(
-              won ? Icons.celebration : Icons.sentiment_dissatisfied,
-              color: won ? Colors.amber : Colors.red,
-              size: 32,
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: (won ? Colors.amber : AppColors.error)
+                    .withValues(alpha: 0.15),
+                borderRadius: AppTheme.buttonRadius,
+              ),
+              child: Icon(
+                won ? Icons.celebration : Icons.sentiment_dissatisfied,
+                color: won ? Colors.amber : AppColors.error,
+                size: 28,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 won ? l10n.congratulations : l10n.gameOver,
-                style: const TextStyle(fontSize: 18),
+                style: TextStyle(
+                  fontSize: 18,
+                  color: theme.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -2267,23 +2539,25 @@ class _GameScreenState extends ConsumerState<GameScreen>
           children: [
             Text(
               won ? l10n.congratsMessage : l10n.gameOverMessage,
-              style: const TextStyle(fontSize: 16),
+              style: TextStyle(fontSize: 15, color: theme.textSecondary),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: theme.accentLight,
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.divider),
               ),
               child: Column(
                 children: [
-                  _buildStatRow(l10n.score, '$score'),
-                  _buildStatRow(l10n.time, _formatTime(_elapsedTime)),
-                  _buildStatRow(l10n.mistakes, '${_gameState.mistakes}/3'),
+                  _buildStatRow(l10n.score, '$score', theme),
+                  _buildStatRow(l10n.time, _formatTime(_elapsedTime), theme),
+                  _buildStatRow(l10n.mistakes, '${_gameState.mistakes}/3', theme),
                   if (_secondChancesUsed > 0)
                     _buildStatRow(
-                        l10n.secondChanceTitle, '$_secondChancesUsed'),
+                        l10n.secondChanceTitle, '$_secondChancesUsed', theme),
                 ],
               ),
             ),
@@ -2295,7 +2569,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
               Navigator.pop(context);
               Navigator.pop(context);
             },
-            child: Text(l10n.home),
+            child: Text(l10n.home,
+                style: TextStyle(color: theme.textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -2303,7 +2578,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
               _restartGame();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1a237e),
+              backgroundColor: theme.buttonPrimary,
+              foregroundColor: theme.buttonText,
+              shape: const RoundedRectangleBorder(
+                  borderRadius: AppTheme.buttonRadius),
             ),
             child: Text(l10n.newGame),
           ),
@@ -2359,6 +2637,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
     final bgColor = theme.background;
     final cardColor = theme.card;
     final textColor = theme.textPrimary;
+    final isAdsFree = ref.watch(adsFreeProvider);
+    final l10n = AppLocalizations.of(context);
 
     if (_isLoading) {
       return Scaffold(
@@ -2388,10 +2668,33 @@ class _GameScreenState extends ConsumerState<GameScreen>
             child: Column(
               children: [
                 // Top bar
-                _buildTopBar(isDark, textColor),
+                GameTopBar(
+                  difficulty: _gameState.difficulty,
+                  textColor: textColor,
+                  onBack: () {
+                    _saveGame();
+                    Navigator.pop(context);
+                  },
+                  onSettings: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  ),
+                ),
 
                 // Game info
-                _buildGameInfo(isDark, textColor),
+                GameInfoBar(
+                  mistakes: _gameState.mistakes,
+                  maxMistakes: 3,
+                  score: _gameState.score,
+                  comboStreak: _gameState.comboStreak,
+                  comboMultiplier:
+                      _getMultiplierForCombo(_gameState.comboStreak),
+                  elapsedTime: _elapsedTime,
+                  showComboMilestone: _showComboMilestone,
+                  lastMilestoneCombo: _lastMilestoneCombo,
+                  textColor: textColor,
+                  isDark: isDark,
+                ),
 
                 // Sudoku grid
                 Expanded(
@@ -2403,15 +2706,38 @@ class _GameScreenState extends ConsumerState<GameScreen>
                       selectedCol: _selectedCol,
                       onCellTap: _onCellTap,
                       completedSections: _completedSections,
+                      droppingCells: _droppingCells,
                     ),
                   ),
                 ),
 
                 // Action buttons
-                _buildActionButtons(isDark, cardColor, textColor),
+                GameActionBar(
+                  isPencilMode: _isPencilMode,
+                  fastPencilEnabled: _fastPencilEnabled,
+                  isAdsFree: isAdsFree,
+                  hintsUsed: _gameState.hintsUsed,
+                  isDark: isDark,
+                  cardColor: cardColor,
+                  textColor: textColor,
+                  onUndo: _onUndo,
+                  onErase: _onErase,
+                  onTogglePencil: _togglePencilMode,
+                  onFastPencil: _onFastPencil,
+                  onHint: _onHint,
+                ),
 
                 // Number pad
-                _buildNumberPad(isDark, cardColor, textColor),
+                GameNumberPad(
+                  isDark: isDark,
+                  cardColor: cardColor,
+                  textColor: textColor,
+                  remainingCounts: {
+                    for (var i = 1; i <= 9; i++)
+                      i: _gameState.getRemainingCount(i),
+                  },
+                  onNumberSelected: _onNumberSelected,
+                ),
 
                 // Banner ad space (always reserve space for consistency)
                 Container(
@@ -2433,403 +2759,33 @@ class _GameScreenState extends ConsumerState<GameScreen>
               onComplete: () => _removeCelebration(celebration.id),
             );
           }),
+
+          // Auto-complete button overlay
+          if (_showAutoCompleteBtn)
+            Positioned(
+              bottom: 180,
+              right: 16,
+              child: _buildAutoCompleteButton(l10n),
+            ),
+
+          // Board completion sweep effect (after auto-complete, before win flow)
+          if (_showBoardCompletion && _boardCompletionRect != null)
+            Positioned.fill(
+              child: BoardCompletionEffect(
+                boardRect: _boardCompletionRect!,
+                onComplete: () {
+                  if (mounted) {
+                    setState(() => _showBoardCompletion = false);
+                    _onGameComplete(skipSound: true);
+                  }
+                },
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildTopBar(bool isDark, Color textColor) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: () {
-              _saveGame();
-              Navigator.pop(context);
-            },
-            icon: Icon(Bootstrap.arrow_left, size: 22.w),
-            color: textColor,
-          ),
-          const Spacer(),
-          // Difficulty indicator
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: textColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              _gameState.difficulty,
-              style: TextStyle(
-                color: textColor,
-                fontWeight: FontWeight.w600,
-                fontSize: 13.sp,
-              ),
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
-            icon: Icon(Bootstrap.gear, size: 22.w),
-            color: textColor,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGameInfo(bool isDark, Color textColor) {
-    final l10n = AppLocalizations.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          // Mistakes
-          _buildInfoItem(
-            icon: Bootstrap.x_circle,
-            label: l10n.mistakes,
-            value: '${_gameState.mistakes}/3',
-            color: _gameState.mistakes > 0
-                ? Colors.red
-                : (isDark ? Colors.grey.shade400 : Colors.grey),
-          ),
-          // Score with combo indicator
-          _buildScoreWithCombo(l10n),
-          // Time
-          _buildInfoItem(
-            icon: Bootstrap.stopwatch,
-            label: l10n.time,
-            value: _formatTime(_elapsedTime),
-            color: textColor,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScoreWithCombo(AppLocalizations l10n) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final combo = _gameState.comboStreak;
-    final multiplier = _getMultiplierForCombo(combo);
-
-    // Color based on combo level (more subtle)
-    Color scoreColor = const Color(0xFFFFB300);
-    if (multiplier >= 3.0) {
-      scoreColor = Colors.deepOrange;
-    } else if (multiplier >= 2.0) {
-      scoreColor = Colors.orange;
-    }
-
-    return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Bootstrap.star_fill,
-              size: 18,
-              color: scoreColor,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              '${_gameState.score}',
-              style: TextStyle(
-                fontSize: 18.sp,
-                fontWeight: FontWeight.bold,
-                color: scoreColor,
-              ),
-            ),
-          ],
-        ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              l10n.score,
-              style: TextStyle(
-                fontSize: 11.sp,
-                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-              ),
-            ),
-            // Show milestone badge only when triggered
-            if (_showComboMilestone) ...[
-              const SizedBox(width: 6),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Colors.orange, Colors.deepOrange],
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${_lastMilestoneCombo}x 🔥',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInfoItem({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Column(
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(width: 4),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 18.sp,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11.sp,
-            color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButtons(bool isDark, Color cardColor, Color textColor) {
-    final isAdsFree = ref.watch(adsFreeProvider);
-    final l10n = AppLocalizations.of(context);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildActionButton(
-            icon: Bootstrap.arrow_counterclockwise,
-            label: l10n.undo,
-            onTap: _onUndo,
-            isDark: isDark,
-            cardColor: cardColor,
-            textColor: textColor,
-          ),
-          _buildActionButton(
-            icon: Bootstrap.eraser,
-            label: l10n.erase,
-            onTap: _onErase,
-            isDark: isDark,
-            cardColor: cardColor,
-            textColor: textColor,
-          ),
-          _buildActionButton(
-            icon: Bootstrap.pencil,
-            label: l10n.notes,
-            onTap: _togglePencilMode,
-            isActive: _isPencilMode,
-            isDark: isDark,
-            cardColor: cardColor,
-            textColor: textColor,
-          ),
-          _buildActionButton(
-            icon: _fastPencilEnabled
-                ? Bootstrap.lightning_charge_fill
-                : Bootstrap.lightning_charge,
-            label: _fastPencilEnabled ? '${l10n.fast} ON' : l10n.fast,
-            onTap: _onFastPencil,
-            isActive: _fastPencilEnabled,
-            isDark: isDark,
-            cardColor: cardColor,
-            textColor: textColor,
-            showAdBadge: !_fastPencilEnabled && !isAdsFree,
-          ),
-          _buildActionButton(
-            icon: Bootstrap.lightbulb,
-            label: l10n.hint,
-            onTap: _onHint,
-            isDark: isDark,
-            cardColor: cardColor,
-            textColor: textColor,
-            showAdBadge:
-                !isAdsFree && _gameState.hintsUsed >= AppConstants.maxHints,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool isActive = false,
-    bool isVip = false,
-    bool showAdBadge = false,
-    required bool isDark,
-    required Color cardColor,
-    required Color textColor,
-  }) {
-    // Ranked ile aynı tasarım - sadece küçük turuncu badge
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive
-              ? AppColors.gradientStart.withValues(alpha: 0.15)
-              : cardColor,
-          borderRadius: BorderRadius.circular(12),
-          border: isActive
-              ? Border.all(
-                  color: AppColors.gradientStart.withValues(alpha: 0.5))
-              : null,
-          boxShadow: isDark
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(
-                  icon,
-                  size: 22,
-                  color: isActive
-                      ? AppColors.gradientStart
-                      : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
-                ),
-                if (showAdBadge || isVip)
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: const BoxDecoration(
-                        color: Colors.orange,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Bootstrap.play_fill,
-                        size: 10,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10.sp,
-                color: isActive
-                    ? AppColors.gradientStart
-                    : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNumberPad(bool isDark, Color cardColor, Color textColor) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: List.generate(9, (index) {
-          final number = index + 1;
-          final remaining = _gameState.getRemainingCount(number);
-          final isCompleted = remaining == 0;
-
-          return GestureDetector(
-            onTap: isCompleted ? null : () => _onNumberSelected(number),
-            child: Container(
-              width: 36.w,
-              height: 50.w,
-              decoration: BoxDecoration(
-                color: isCompleted
-                    ? (isDark ? Colors.grey.shade800 : Colors.grey.shade200)
-                    : cardColor,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: (isCompleted || isDark)
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '$number',
-                    style: TextStyle(
-                      fontSize: 20.sp,
-                      fontWeight: FontWeight.bold,
-                      color: isCompleted
-                          ? (isDark
-                              ? Colors.grey.shade600
-                              : Colors.grey.shade400)
-                          : textColor,
-                    ),
-                  ),
-                  if (!isCompleted)
-                    Text(
-                      '$remaining',
-                      style: TextStyle(
-                        fontSize: 9.sp,
-                        color: isDark
-                            ? Colors.grey.shade500
-                            : Colors.grey.shade500,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
 }
 
 class _CelebrationData {

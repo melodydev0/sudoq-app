@@ -118,6 +118,16 @@ class StorageService {
     await prefs.setBool(AppConstants.keySoundEnabled, value);
   }
 
+  // ==================== Push Notifications ====================
+
+  static bool getPushNotificationsEnabled() {
+    return prefs.getBool(AppConstants.keyPushNotificationsEnabled) ?? true;
+  }
+
+  static Future<void> setPushNotificationsEnabled(bool value) async {
+    await prefs.setBool(AppConstants.keyPushNotificationsEnabled, value);
+  }
+
   // ==================== Daily Challenge ====================
 
   static DailyChallengeHistory getDailyChallengeHistory() {
@@ -175,6 +185,31 @@ class StorageService {
     final encoded =
         progress.entries.map((e) => '${e.key}=${e.value}').join('&');
     await prefs.setString(AppConstants.keyAchievements, encoded);
+  }
+
+  // ==================== User Nickname ====================
+
+  static const String _keyNickname = 'user_nickname';
+  static const String _keyCountryCode = 'user_country_code';
+
+  /// Get user's custom nickname
+  static String? getNickname() {
+    return prefs.getString(_keyNickname);
+  }
+
+  /// Set user's custom nickname
+  static Future<void> setNickname(String nickname) async {
+    await prefs.setString(_keyNickname, nickname);
+  }
+
+  /// Get user's country code
+  static String getCountryCode() {
+    return prefs.getString(_keyCountryCode) ?? 'TR';
+  }
+
+  /// Set user's country code
+  static Future<void> setCountryCode(String code) async {
+    await prefs.setString(_keyCountryCode, code);
   }
 
   // ==================== Utility ====================

@@ -7,24 +7,47 @@ service cloud.firestore {
     // Each user can only access their own data
     // ============================================================
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (
+        request.auth.uid == userId
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
+      allow create: if request.auth != null && request.auth.uid == userId
+        && !('isAdsFree' in request.resource.data);
       allow update: if request.auth != null && request.auth.uid == userId
-        // ELO must be 0-5000 when duelStats or battleStats is present
-        && (request.resource.data.duelStats == null || (request.resource.data.duelStats.elo >= 0 && request.resource.data.duelStats.elo <= 5000))
-        && (request.resource.data.battleStats == null || (request.resource.data.battleStats.elo >= 0 && request.resource.data.battleStats.elo <= 5000));
-      allow delete: if request.auth != null && request.auth.uid == userId;
+        // Premium entitlement is server-managed; client cannot change this field.
+        && (
+          !('isAdsFree' in request.resource.data)
+          || request.resource.data.isAdsFree == resource.data.isAdsFree
+        );
+      allow delete: if request.auth != null && (
+        request.auth.uid == userId
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
       
       // Duel match history subcollection
       match /duel_history/{matchId} {
-        allow read: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && (
+          request.auth.uid == userId
+          || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+        );
         allow write: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null && (
+          request.auth.uid == userId
+          || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+        );
       }
       
       // Achievements subcollection
       match /achievements/{achievementId} {
-        allow read: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && (
+          request.auth.uid == userId
+          || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+        );
         allow write: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null && (
+          request.auth.uid == userId
+          || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+        );
       }
     }
     
@@ -34,8 +57,22 @@ service cloud.firestore {
     // ============================================================
     match /leaderboard/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.totalXp is int
+        && request.resource.data.totalXp >= 0
+        && request.resource.data.level is int
+        && request.resource.data.level >= 1
+        && request.resource.data.level <= 100;
+      allow update: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.totalXp is int
+        && request.resource.data.totalXp >= 0
+        && request.resource.data.level is int
+        && request.resource.data.level >= 1
+        && request.resource.data.level <= 100;
+      allow delete: if request.auth != null && (
+        request.auth.uid == userId
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
     }
 
     // ============================================================
@@ -45,14 +82,77 @@ service cloud.firestore {
     // ============================================================
     match /duel_leaderboard/{oderId} {
       allow read: if true;
-      allow create: if request.auth != null && request.auth.uid == oderId;
+      allow create: if request.auth != null && request.auth.uid == oderId
+        && request.resource.data.elo is int
+        && request.resource.data.elo >= 0 
+        && request.resource.data.elo <= 5000
+        && request.resource.data.updatedAt is timestamp;
       allow update: if request.auth != null && request.auth.uid == oderId
         // Validate ELO bounds
         && request.resource.data.elo >= 0 
         && request.resource.data.elo <= 5000
         // Require timestamp
         && request.resource.data.updatedAt is timestamp;
-      allow delete: if request.auth != null && request.auth.uid == oderId;
+      allow delete: if request.auth != null && (
+        request.auth.uid == oderId
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
+    }
+
+    // ============================================================
+    // ENTITLEMENTS (Source of truth for premium/subscriptions)
+    // Readable by owner; writable only by trusted backend (Admin SDK).
+    // ============================================================
+    match /entitlements/{userId} {
+      allow read: if request.auth != null && (
+        request.auth.uid == userId
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
+      allow delete: if request.auth != null && (
+        request.auth.uid == userId
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
+      allow create, update: if request.auth != null
+        && request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr'];
+    }
+
+    // ============================================================
+    // PURCHASE CLAIMS
+    // Client can only create its own pending claim.
+    // Verification result is written by Cloud Functions (Admin SDK bypasses rules).
+    // ============================================================
+    match /purchase_claims/{claimId} {
+      allow read: if request.auth != null && (
+        resource.data.uid == request.auth.uid
+        || request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr']
+      );
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.platform in ['android', 'ios']
+        && request.resource.data.productId in [
+          'sudoq_premium',
+          'sudoq_premium_weekly',
+          'sudoq_premium_monthly',
+          'sudoq_premium_yearly'
+        ]
+        && (
+          (
+            request.resource.data.platform == 'android'
+            && request.resource.data.purchaseToken is string
+            && request.resource.data.purchaseToken.size() > 20
+          )
+          ||
+          (
+            request.resource.data.platform == 'ios'
+            && request.resource.data.receiptData is string
+            && request.resource.data.receiptData.size() > 20
+          )
+        )
+        && request.resource.data.createdAt is timestamp;
+      allow update: if false;
+      allow delete: if request.auth != null
+        && request.auth.token.email in ['gobettingtipslive@gmail.com', 'sudoqsupport@gmail.com', 'iletisim@melodyyazilim.com.tr'];
     }
     
     // ============================================================
@@ -74,23 +174,39 @@ service cloud.firestore {
     // DUEL BATTLES (Real-time multiplayer)
     // ============================================================
     match /battles/{battleId} {
-      // Anyone signed in can read battles they're part of
+      // Players can read battles they're part of
       allow read: if request.auth != null 
         && (resource.data.player1.oderId == request.auth.uid 
             || resource.data.player2.oderId == request.auth.uid
             || resource.data.status == 'waiting');
       
-      // Only signed-in users can create battles
-      allow create: if request.auth != null
-        && request.resource.data.player1.oderId == request.auth.uid
-        && request.resource.data.status in ['waiting', 'countdown', 'playing'];
+      // Battles are created by server-side matchmaker only.
+      allow create: if false;
       
-      // Only participants can update their own data
-      allow update: if request.auth != null 
+      // Only participants can update, with field-level restrictions
+      allow update: if request.auth != null
         && (resource.data.player1.oderId == request.auth.uid 
             || resource.data.player2.oderId == request.auth.uid)
-        // Prevent changing opponent's data directly
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['player1.oderId', 'player2.oderId', 'puzzle', 'solution']));
+        // Cannot change puzzle, solution, or creation metadata
+        && request.resource.data.puzzle == resource.data.puzzle
+        && request.resource.data.solution == resource.data.solution
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.player1.oderId == resource.data.player1.oderId
+        && request.resource.data.player2.oderId == resource.data.player2.oderId
+        // Player1 cannot modify player2's core fields and vice versa
+        && (
+          request.auth.uid == resource.data.player1.oderId
+          // Player1: can only change own data, not player2's progress/mistakes
+          ? (request.resource.data.player2.progress == resource.data.player2.progress
+             && request.resource.data.player2.mistakes == resource.data.player2.mistakes
+             && request.resource.data.player2.correctCells == resource.data.player2.correctCells
+             && request.resource.data.player2.isFinished == resource.data.player2.isFinished)
+          // Player2: can only change own data, not player1's progress/mistakes
+          : (request.resource.data.player1.progress == resource.data.player1.progress
+             && request.resource.data.player1.mistakes == resource.data.player1.mistakes
+             && request.resource.data.player1.correctCells == resource.data.player1.correctCells
+             && request.resource.data.player1.isFinished == resource.data.player1.isFinished)
+        );
       
       // No deletion - battles are permanent records
       allow delete: if false;
@@ -104,11 +220,22 @@ service cloud.firestore {
       // Anyone can read to find opponents
       allow read: if request.auth != null;
       
-      // Only owner can write/delete their entry
+      // Owner can only create/update their own SEARCHING heartbeat entry.
       allow create: if request.auth != null && request.auth.uid == oderId
+        && request.resource.data.status == 'searching'
+        && !('battleId' in request.resource.data)
         && request.resource.data.elo >= 0 
-        && request.resource.data.elo <= 5000;
-      allow update: if request.auth != null && request.auth.uid == oderId;
+        && request.resource.data.elo <= 5000
+        && request.resource.data.expiresAt is timestamp;
+      allow update: if request.auth != null && request.auth.uid == oderId
+        && request.resource.data.status == 'searching'
+        && !('battleId' in request.resource.data)
+        && request.resource.data.elo == resource.data.elo
+        && request.resource.data.displayName == resource.data.displayName
+        && request.resource.data.photoUrl == resource.data.photoUrl
+        && request.resource.data.division == resource.data.division
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && request.resource.data.expiresAt is timestamp;
       allow delete: if request.auth != null && request.auth.uid == oderId;
     }
     
@@ -123,7 +250,10 @@ service cloud.firestore {
       // Season leaderboard
       match /leaderboard/{oderId} {
         allow read: if true;
-        allow write: if request.auth != null && request.auth.uid == oderId;
+        allow write: if request.auth != null && request.auth.uid == oderId
+          && request.resource.data.elo is int
+          && request.resource.data.elo >= 0
+          && request.resource.data.elo <= 5000;
       }
     }
     
@@ -137,10 +267,32 @@ service cloud.firestore {
     }
     
     // ============================================================
+    // DAILY GLOBAL STATS
+    // Daily challenge completion counters
+    // Anyone can read, authenticated users can increment via transaction
+    // ============================================================
+    match /daily_global_stats/{dateId} {
+      allow read: if true;
+      
+      // Allow authenticated users to create/update stats
+      // Only increments by 1 are allowed to prevent abuse
+      allow create: if request.auth != null
+        && request.resource.data.playersCompleted == 1
+        && request.resource.data.totalAttempts == 1;
+      
+      allow update: if request.auth != null
+        // playersCompleted can only increase by 1
+        && request.resource.data.playersCompleted == resource.data.playersCompleted + 1
+        // totalAttempts can only increase by 1
+        && request.resource.data.totalAttempts == resource.data.totalAttempts + 1;
+    }
+    
+    // ============================================================
     // REPORTS (For abuse reporting)
     // ============================================================
     match /reports/{reportId} {
-      allow read: if false; // Only admins
+      allow read: if request.auth != null
+        && request.auth.token.email in ['gobettingtipslive@gmail.com'];
       allow create: if request.auth != null
         && request.resource.data.reporterId == request.auth.uid
         && request.resource.data.createdAt is timestamp;

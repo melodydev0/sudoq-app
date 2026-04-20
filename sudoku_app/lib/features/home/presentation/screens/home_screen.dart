@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../../../core/services/ads_service.dart';
 import '../../../../core/services/level_service.dart';
+import '../../../../core/services/daily_challenge_service.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/theme/app_theme_manager.dart';
@@ -29,12 +30,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   late int _selectedIndex;
   bool _isDailyBonusAvailable = false;
   bool _routeObserverSubscribed = false;
+  bool _isReady = false; // Defer heavy widgets to second frame
 
   @override
   void initState() {
     super.initState();
     _selectedIndex = widget.initialTab;
-    _checkDailyBonus();
+    // Defer heavy UI to second frame for smooth transition
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() => _isReady = true);
+        _checkDailyBonus();
+      }
+    });
   }
 
   @override
@@ -80,7 +88,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       backgroundColor: theme.backgroundGradientEnd,
       extendBody: true,
       body: _buildBody(),
-      bottomNavigationBar: _buildBottomNav(),
+      // Defer bottom nav to avoid icon load jank on first frame
+      bottomNavigationBar: _isReady ? _buildBottomNav() : null,
     );
   }
 
@@ -91,9 +100,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       case 0:
         return _buildHomeTab();
       case 1:
-        // Use ValueKey to rebuild when switching to this tab (for ELO animation)
-        return BattleLobbyScreen(
-            key: ValueKey('duel_${DateTime.now().millisecondsSinceEpoch}'));
+        return const BattleLobbyScreen(
+            key: ValueKey('duel'));
       case 2:
         return const ProfileScreen();
       default:
@@ -103,8 +111,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
 
   Widget _buildHomeTab() {
     ResponsiveUtils.init(context);
-    // Use AppThemeManager for premium themes
     final theme = AppThemeManager.colors;
+
+    // First frame: show minimal UI to avoid jank
+    if (!_isReady) {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [theme.backgroundGradientStart, theme.backgroundGradientEnd],
+          ),
+        ),
+        child: const SafeArea(child: SizedBox.shrink()),
+      );
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -147,7 +168,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                   ),
                   IconButton(
                     onPressed: () {
-                      HapticFeedback.selectionClick();
+                      HapticService.selectionClick();
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -207,11 +228,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   Widget _buildDailyChallengeCard(AppThemeColors theme) {
     final now = DateTime.now();
     final l10n = AppLocalizations.of(context);
+    final isTodayCompleted = DailyChallengeService.isDateCompleted(now);
 
     return Container(
       padding: EdgeInsets.all(16.w),
       decoration: BoxDecoration(
-        color: const Color(0xFF5B5F97),
+        color: isTodayCompleted 
+            ? const Color(0xFF5B5F97).withValues(alpha: 0.5)
+            : const Color(0xFF5B5F97),
         borderRadius: BorderRadius.circular(20.w),
         boxShadow: [
           BoxShadow(
@@ -227,7 +251,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () {
-              HapticFeedback.selectionClick();
+              HapticService.selectionClick();
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const DailyChallengeScreen()),
@@ -237,10 +261,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
               width: 55.w,
               height: 65.w,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+                color: Colors.white.withValues(alpha: isTodayCompleted ? 0.15 : 0.2),
                 borderRadius: BorderRadius.circular(12.w),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.3),
+                  color: Colors.white.withValues(alpha: isTodayCompleted ? 0.2 : 0.3),
                   width: 1.5,
                 ),
               ),
@@ -255,27 +279,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                           style: TextStyle(
                             fontSize: 24.sp,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: Colors.white.withValues(alpha: isTodayCompleted ? 0.7 : 1.0),
                           ),
                         ),
                         Text(
                           l10n.getMonth(now.month),
                           style: TextStyle(
                             fontSize: 11.sp,
-                            color: Colors.white.withValues(alpha: 0.9),
+                            color: Colors.white.withValues(alpha: isTodayCompleted ? 0.6 : 0.9),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  // Small calendar indicator
+                  // Small calendar indicator or check mark
                   Positioned(
                     top: 4.w,
                     right: 4.w,
                     child: Icon(
-                      Bootstrap.calendar_event,
+                      isTodayCompleted ? Bootstrap.check_circle_fill : Bootstrap.calendar_event,
                       size: 12.w,
-                      color: Colors.white.withValues(alpha: 0.7),
+                      color: isTodayCompleted 
+                          ? Colors.greenAccent.withValues(alpha: 0.8)
+                          : Colors.white.withValues(alpha: 0.7),
                     ),
                   ),
                 ],
@@ -283,7 +309,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
             ),
           ),
           SizedBox(width: 14.w),
-          // Main content - Play daily challenge
+          // Main content - Play daily challenge or show completed
           Expanded(
             child: GestureDetector(
               onTap: () => _startDailyChallenge(),
@@ -295,17 +321,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                     style: TextStyle(
                       fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: Colors.white.withValues(alpha: isTodayCompleted ? 0.7 : 1.0),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: 4.w),
                   Text(
-                    AppLocalizations.of(context).dailyChallengeSubtitle,
+                    isTodayCompleted 
+                        ? l10n.completed
+                        : AppLocalizations.of(context).dailyChallengeSubtitle,
                     style: TextStyle(
                       fontSize: 12.sp,
-                      color: Colors.white.withValues(alpha: 0.85),
+                      color: isTodayCompleted
+                          ? Colors.greenAccent.withValues(alpha: 0.8)
+                          : Colors.white.withValues(alpha: 0.85),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -319,12 +349,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
             child: Container(
               padding: EdgeInsets.all(10.w),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+                color: Colors.white.withValues(alpha: isTodayCompleted ? 0.15 : 0.2),
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Bootstrap.play_fill,
-                color: Colors.white,
+                isTodayCompleted ? Bootstrap.check_lg : Bootstrap.play_fill,
+                color: isTodayCompleted 
+                    ? Colors.greenAccent.withValues(alpha: 0.8)
+                    : Colors.white,
                 size: 24.w,
               ),
             ),
@@ -375,7 +407,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Daily Bonus',
+                    AppLocalizations.of(context).dailyBonus,
                     style: TextStyle(
                       fontSize: 17.sp,
                       fontWeight: FontWeight.bold,
@@ -385,8 +417,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                   SizedBox(height: 4.w),
                   Text(
                     isAvailable
-                        ? 'Watch ad, earn +50 XP!'
-                        : 'Come back tomorrow!',
+                        ? AppLocalizations.of(context).watchAdEarnXp
+                        : AppLocalizations.of(context).comeBackTomorrow,
                     style: TextStyle(
                       fontSize: 12.sp,
                       color: Colors.white.withValues(alpha: 0.9),
@@ -416,21 +448,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   }
 
   void _claimDailyBonus() async {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
 
     // Show loading
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const PopScope(
+      builder: (ctx) => PopScope(
         canPop: false,
         child: AlertDialog(
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Loading ad...'),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(AppLocalizations.of(context).loadingAd),
             ],
           ),
         ),
@@ -447,53 +479,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       onAdNotReady: () {
         adNotReady = true;
       },
-      onAdClosed: () {
-        Future.delayed(const Duration(milliseconds: 500), () async {
+      onAdClosed: () async {
+        if (!mounted) return;
+        Navigator.pop(context);
+
+        if (rewarded) {
+          await LevelService.addBonusXp(50);
+
           if (!mounted) return;
-          Navigator.pop(context); // Close loading
+          setState(() {
+            _isDailyBonusAvailable = false;
+          });
 
-          if (rewarded) {
-            // Add 50 XP bonus
-            await LevelService.addBonusXp(50);
-
-            // Update state
-            setState(() {
-              _isDailyBonusAvailable = false;
-            });
-
-            // Show success message
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Row(
-                    children: [
-                      const Icon(Icons.star, color: Colors.white),
-                      const SizedBox(width: 8),
-                      Text('+50 XP bonus claimed!',
-                          style: TextStyle(fontSize: 14.sp)),
-                    ],
-                  ),
-                  backgroundColor: Colors.green,
-                  duration: const Duration(seconds: 3),
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.star, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Text(AppLocalizations.of(context).xpBonusClaimed,
+                        style: TextStyle(fontSize: 14.sp)),
+                  ],
                 ),
-              );
-            }
-          } else {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    adNotReady
-                        ? AppLocalizations.of(context).adLoadingTryAgain
-                        : AppLocalizations.of(context).watchFullAdForBonus,
-                  ),
-                  backgroundColor: Colors.orange,
-                  duration: Duration(seconds: adNotReady ? 4 : 2),
-                ),
-              );
-            }
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 3),
+              ),
+            );
           }
-        });
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  adNotReady
+                      ? AppLocalizations.of(context).adLoadingTryAgain
+                      : AppLocalizations.of(context).watchFullAdForBonus,
+                ),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: adNotReady ? 4 : 2),
+              ),
+            );
+          }
+        }
       },
     );
   }
@@ -592,28 +620,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
         'key': 'Easy',
         'color': const Color(0xFF4CAF50),
         'icon': Bootstrap.emoji_smile_fill,
-        'xp': 15
+        'imagePath': 'assets/difficulty/easy.png',
       },
       {
         'name': l10n.medium,
         'key': 'Medium',
         'color': const Color(0xFFFF9800),
         'icon': Bootstrap.emoji_neutral_fill,
-        'xp': 30
+        'imagePath': 'assets/difficulty/medium.png',
       },
       {
         'name': l10n.hard,
         'key': 'Hard',
         'color': const Color(0xFFE53935),
         'icon': Bootstrap.emoji_frown_fill,
-        'xp': 50
+        'imagePath': 'assets/difficulty/hard.png',
       },
       {
         'name': l10n.expert,
         'key': 'Expert',
         'color': const Color(0xFF9C27B0),
         'icon': Bootstrap.lightning_charge_fill,
-        'xp': 80
+        'imagePath': 'assets/difficulty/expert.png',
       },
     ];
 
@@ -636,74 +664,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
             decoration: BoxDecoration(
               color: cardColor,
               borderRadius: BorderRadius.circular(16.w),
+              border: Border.all(
+                color: diffColor.withValues(alpha: 0.25),
+                width: 1,
+              ),
               boxShadow: isDark
                   ? null
                   : [
                       BoxShadow(
-                        color: diffColor.withValues(alpha: 0.2),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
                       ),
                     ],
             ),
-            child: Stack(
-              children: [
-                // XP Badge at top right
-                Positioned(
-                  top: 8.w,
-                  right: 8.w,
-                  child: Container(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.w),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.amber.shade400,
-                          Colors.orange.shade400,
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(8.w),
-                    ),
-                    child: Text(
-                      '+${diff['xp']} XP',
-                      style: TextStyle(
-                        fontSize: 9.sp,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    diff['imagePath'] as String,
+                    width: 32.w,
+                    height: 32.w,
+                    errorBuilder: (_, __, ___) => Icon(
+                      diff['icon'] as IconData,
+                      size: 32.w,
+                      color: diffColor,
                     ),
                   ),
-                ),
-                // Main content
-                Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        diff['icon'] as IconData,
-                        size: 28.w,
-                        color: diffColor,
-                      ),
-                      SizedBox(height: 6.w),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8.w),
-                          child: Text(
-                            diff['name'] as String,
-                            style: TextStyle(
-                              fontSize: 14.sp,
-                              fontWeight: FontWeight.w600,
-                              color: diffColor,
-                            ),
-                            maxLines: 1,
-                          ),
+                  SizedBox(height: 8.w),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12.w),
+                      child: Text(
+                        diff['name'] as String,
+                        style: TextStyle(
+                          fontSize: 15.sp,
+                          fontWeight: FontWeight.w600,
+                          color: diffColor,
                         ),
+                        maxLines: 1,
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -792,17 +798,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   }
 
   void _startDailyChallenge() {
-    // Daily challenge - seed created with today's date
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const GameScreen(
-          difficulty: 'Medium',
-          isNewGame: true,
-          isDailyChallenge: true,
+    final isTodayCompleted = DailyChallengeService.isDateCompleted(DateTime.now());
+    
+    if (isTodayCompleted) {
+      // Today's challenge already completed - go to calendar
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DailyChallengeScreen()),
+      );
+    } else {
+      // Daily challenge - seed created with today's date
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const GameScreen(
+            difficulty: 'Medium',
+            isNewGame: true,
+            isDailyChallenge: true,
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   String _formatDuration(Duration duration) {

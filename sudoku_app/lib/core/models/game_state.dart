@@ -135,6 +135,17 @@ class GameState {
     return puzzle[row][col] != 0;
   }
 
+  /// Number of empty cells (currentGrid[r][c] == 0)
+  int get emptyCellCount {
+    int count = 0;
+    for (int r = 0; r < gridSize; r++) {
+      for (int c = 0; c < gridSize; c++) {
+        if (currentGrid[r][c] == 0) count++;
+      }
+    }
+    return count;
+  }
+
   /// Get remaining count for a number
   int getRemainingCount(int number) {
     int count = gridSize;
@@ -176,6 +187,7 @@ class GameState {
       'score': score,
       'elapsedTime': elapsedTime.inSeconds,
       'isCompleted': isCompleted,
+      'isPaused': isPaused,
       'startTime': startTime.toIso8601String(),
       'moveHistory': moveHistory.map((m) => m.toJson()).toList(),
       'comboStreak': comboStreak,
@@ -188,43 +200,44 @@ class GameState {
 
   /// Deserialize from JSON
   factory GameState.fromJson(Map<String, dynamic> json) {
-    final gridSize = json['gridSize'] as int;
+    final gridSize = (json['gridSize'] as num).toInt();
     return GameState(
       puzzle: (json['puzzle'] as List)
-          .map((row) => (row as List).map((e) => e as int).toList())
+          .map((row) => (row as List).map((e) => (e as num).toInt()).toList())
           .toList(),
       solution: (json['solution'] as List)
-          .map((row) => (row as List).map((e) => e as int).toList())
+          .map((row) => (row as List).map((e) => (e as num).toInt()).toList())
           .toList(),
       currentGrid: (json['currentGrid'] as List)
-          .map((row) => (row as List).map((e) => e as int).toList())
+          .map((row) => (row as List).map((e) => (e as num).toInt()).toList())
           .toList(),
       notes: (json['notes'] as List)
           .map((row) => (row as List)
-              .map((cell) => (cell as List).map((e) => e as int).toSet())
+              .map((cell) => (cell as List).map((e) => (e as num).toInt()).toSet())
               .toList())
           .toList(),
       difficulty: json['difficulty'] as String,
       gridSize: gridSize,
-      mistakes: json['mistakes'] as int,
-      hintsUsed: json['hintsUsed'] as int,
-      score: json['score'] as int,
-      elapsedTime: Duration(seconds: json['elapsedTime'] as int),
+      mistakes: (json['mistakes'] as num).toInt(),
+      hintsUsed: (json['hintsUsed'] as num).toInt(),
+      score: (json['score'] as num).toInt(),
+      elapsedTime: Duration(seconds: (json['elapsedTime'] as num).toInt()),
       isCompleted: json['isCompleted'] as bool? ?? false,
+      isPaused: json['isPaused'] as bool? ?? false,
       startTime: DateTime.parse(json['startTime'] as String),
       moveHistory: (json['moveHistory'] as List?)
               ?.map((m) => GameMove.fromJson(m as Map<String, dynamic>))
               .toList() ??
           [],
-      comboStreak: json['comboStreak'] as int? ?? 0,
-      maxCombo: json['maxCombo'] as int? ?? 0,
-      fastSolves: json['fastSolves'] as int? ?? 0,
+      comboStreak: (json['comboStreak'] as num?)?.toInt() ?? 0,
+      maxCombo: (json['maxCombo'] as num?)?.toInt() ?? 0,
+      fastSolves: (json['fastSolves'] as num?)?.toInt() ?? 0,
       lastMoveTime: json['lastMoveTime'] != null
           ? DateTime.parse(json['lastMoveTime'] as String)
           : null,
       confirmedCorrectCells: json['confirmedCorrectCells'] != null
           ? Set<int>.from(
-              (json['confirmedCorrectCells'] as List).map((e) => e as int))
+              (json['confirmedCorrectCells'] as List).map((e) => (e as num).toInt()))
           : null,
     );
   }
@@ -272,14 +285,17 @@ class GameMove {
 
   factory GameMove.fromJson(Map<String, dynamic> json) {
     return GameMove(
-      row: json['row'] as int,
-      col: json['col'] as int,
-      previousValue: json['previousValue'] as int?,
-      newValue: json['newValue'] as int?,
+      row: (json['row'] as num).toInt(),
+      col: (json['col'] as num).toInt(),
+      previousValue: (json['previousValue'] as num?)?.toInt(),
+      newValue: (json['newValue'] as num?)?.toInt(),
       previousNotes:
-          (json['previousNotes'] as List?)?.map((e) => e as int).toSet(),
-      newNotes: (json['newNotes'] as List?)?.map((e) => e as int).toSet(),
-      type: MoveType.values.byName(json['type'] as String),
+          (json['previousNotes'] as List?)?.map((e) => (e as num).toInt()).toSet(),
+      newNotes: (json['newNotes'] as List?)?.map((e) => (e as num).toInt()).toSet(),
+      type: MoveType.values.firstWhere(
+        (e) => e.name == (json['type'] as String),
+        orElse: () => MoveType.setValue,
+      ),
       timestamp: DateTime.parse(json['timestamp'] as String),
     );
   }

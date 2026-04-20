@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme_manager.dart';
 import '../../../../core/l10n/app_localizations.dart';
@@ -127,7 +127,7 @@ class _TutorialScreenState extends State<TutorialScreen>
   }
 
   void _onCellTap(int row, int col) {
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
 
     if (_currentPage == 1) {
       // Page 2: Tap to Place
@@ -160,7 +160,7 @@ class _TutorialScreenState extends State<TutorialScreen>
   }
 
   void _onNumberTap(int number) {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
 
     if (_currentPage == 1 && _page2Step == 1) {
       // Page 2: Place number
@@ -190,7 +190,7 @@ class _TutorialScreenState extends State<TutorialScreen>
   }
 
   void _onPencilTap() {
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
 
     if (_currentPage == 2 && _page3Step == 0) {
       setState(() {
@@ -201,7 +201,7 @@ class _TutorialScreenState extends State<TutorialScreen>
   }
 
   void _onHintTap() {
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
 
     if (_currentPage == 3 && _page4Step == 1) {
       setState(() {

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -128,12 +128,12 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
 
     // Theme colors
     final bgColor = theme.background;
-    final headerBg = isDark ? theme.card : const Color(0xFFF8FAFC);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1A2E);
-    final textSecondary = isDark ? Colors.white60 : const Color(0xFF607D8B);
-    final textMuted = isDark ? Colors.white38 : const Color(0xFF90A4AE);
-    final cardBg = isDark ? theme.card : Colors.white;
-    final dividerColor = isDark ? Colors.white12 : const Color(0xFFE8E8E8);
+    final headerBg = theme.card;
+    final textPrimary = theme.textPrimary;
+    final textSecondary = theme.textSecondary;
+    final textMuted = theme.textMuted;
+    final cardBg = theme.card;
+    final dividerColor = theme.divider;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -208,8 +208,8 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
     final backBtnBg = isDark
         ? Colors.white.withValues(alpha: 0.1)
         : Colors.black.withValues(alpha: 0.05);
-    final backBtnIcon = isDark ? Colors.white70 : textPrimary;
-    final trophyBtnBg = isDark ? theme.buttonPrimary : const Color(0xFF37474F);
+    final backBtnIcon = theme.textPrimary;
+    final trophyBtnBg = theme.buttonPrimary;
 
     return Container(
       padding: EdgeInsets.fromLTRB(8.w, 4.w, 8.w, 8.w),
@@ -246,7 +246,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
                   ),
                 ),
                 Text(
-                  'DAILY CHALLENGE',
+                  l10n.dailyChallengeTitle,
                   style: TextStyle(
                     fontSize: 9.sp,
                     color: textMuted,
@@ -301,7 +301,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
     Color textSecondary,
     Color textMuted,
   ) {
-    final progressBarBg = isDark ? Colors.white12 : const Color(0xFFE0E0E0);
+    final progressBarBg = AppThemeManager.colors.progressBackground;
     final progressBarFill = progress.isComplete
         ? [const Color(0xFF4CAF50), const Color(0xFF66BB6A)]
         : [const Color(0xFFD4B896), const Color(0xFFC4A060)];
@@ -319,7 +319,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
                 child: MonthlyBadgeWidget(
                   badgeInfo: badgeInfo,
                   isEarned: progress.isComplete,
-                  size: 90,
+                  size: 72.w,
                   completedDays: progress.completedDays,
                   totalDays: progress.totalDays,
                   showProgress: false,
@@ -409,12 +409,10 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
 
   Widget _buildMonthNavigation(
       AppLocalizations l10n, bool isDark, Color textSecondary) {
-    final navBtnBg =
-        isDark ? Colors.white.withValues(alpha: 0.1) : const Color(0xFFF0F0F0);
-    final navBtnIcon = isDark ? Colors.white70 : textSecondary;
-    final monthPillBg =
-        isDark ? Colors.white.withValues(alpha: 0.15) : const Color(0xFF37474F);
-    final monthPillText = isDark ? Colors.white : Colors.white;
+    final navBtnBg = AppThemeManager.colors.highlight;
+    final navBtnIcon = AppThemeManager.colors.textSecondary;
+    final monthPillBg = AppThemeManager.colors.accent;
+    final monthPillText = AppThemeManager.colors.buttonText;
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 16.w),
@@ -468,10 +466,10 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
   }
 
   Widget _buildWeekdayHeader(bool isDark, AppThemeColors theme) {
-    final days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    final weekdayColor = isDark ? Colors.white38 : Colors.grey.shade500;
-    final weekendColor =
-        isDark ? Colors.orange.shade300 : Colors.orange.shade600;
+    final l10n = AppLocalizations.of(context);
+    final days = l10n.weekdayAbbrs.split(',');
+    final weekdayColor = theme.textMuted;
+    final weekendColor = theme.warning;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(8.w, 12.w, 8.w, 4.w),
@@ -573,7 +571,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
     required double cellHeight,
   }) {
     Color backgroundColor = Colors.transparent;
-    Color textColor = isDark ? Colors.white : Colors.black87;
+    Color textColor = theme.textPrimary;
     Color? borderColor;
 
     if (isSelected) {
@@ -584,7 +582,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
     }
 
     if (isFuture) {
-      textColor = isDark ? Colors.white24 : Colors.grey.shade400;
+      textColor = theme.textMuted;
     }
 
     final circleSize = (cellHeight * 0.7).clamp(28.0, 40.0);
@@ -595,7 +593,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
       onTap: () {
         if (!isFuture) {
           setState(() => _selectedDate = date);
-          HapticFeedback.selectionClick();
+          HapticService.selectionClick();
         }
       },
       child: Center(
@@ -647,7 +645,7 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
                   width: dotSize * 0.7,
                   height: dotSize * 0.7,
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.white12 : Colors.grey.shade300,
+                    color: theme.divider,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -665,127 +663,132 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
     final isCompleted = DailyChallengeService.isDateCompleted(_selectedDate!);
     final canPlay = DailyChallengeService.canPlayDate(_selectedDate!);
 
-    final bgColor =
-        isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50;
-    final textColor = isDark ? Colors.white : Colors.black87;
+    final bgColor = theme.highlight;
+    final textColor = theme.textPrimary;
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(12.w, 10.w, 12.w, 12.w),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(20.w),
-          bottomRight: Radius.circular(20.w),
-        ),
-      ),
-      child: Row(
-        children: [
-          // Date info
-          Expanded(
-            child: Row(
-              children: [
-                Container(
-                  padding: EdgeInsets.all(8.w),
-                  decoration: BoxDecoration(
-                    color: isCompleted
-                        ? Colors.green.withValues(alpha: 0.15)
-                        : (isDark ? Colors.white12 : Colors.grey.shade200),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isCompleted
-                        ? Bootstrap.check_circle_fill
-                        : Bootstrap.calendar_event,
-                    color: isCompleted
-                        ? Colors.green
-                        : (isDark ? Colors.white54 : Colors.grey),
-                    size: 18.w,
-                  ),
-                ),
-                SizedBox(width: 10.w),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatDate(_selectedDate!, l10n),
-                      style: TextStyle(
-                        fontSize: 13.sp,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                    Text(
-                      isCompleted
-                          ? l10n.completed
-                          : canPlay
-                              ? l10n.notCompleted
-                              : l10n.comingSoon,
-                      style: TextStyle(
-                        fontSize: 10.sp,
-                        color: isCompleted
-                            ? Colors.green
-                            : (isDark ? Colors.white38 : Colors.grey),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+    return SizedBox(
+      height: 64.w,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12.w),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.only(
+            bottomLeft: Radius.circular(20.w),
+            bottomRight: Radius.circular(20.w),
           ),
-
-          // Action button
-          if (canPlay && !isCompleted)
-            ElevatedButton(
-              onPressed: () => _playChallenge(_selectedDate!),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryBlue,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.w),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12.w),
-                ),
-                elevation: 2,
-              ),
+        ),
+        child: Row(
+          children: [
+            // Date info
+            Expanded(
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Bootstrap.play_fill, size: 14.w),
-                  SizedBox(width: 6.w),
-                  Text(
-                    l10n.playNow,
-                    style: TextStyle(
-                      fontSize: 12.sp,
-                      fontWeight: FontWeight.w600,
+                  Container(
+                    width: 36.w,
+                    height: 36.w,
+                    decoration: BoxDecoration(
+                      color: isCompleted
+                          ? Colors.green.withValues(alpha: 0.15)
+                          : theme.highlight,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isCompleted
+                          ? Bootstrap.check_circle_fill
+                          : Bootstrap.calendar_event,
+                      color: isCompleted ? Colors.green : theme.textMuted,
+                      size: 18.w,
                     ),
                   ),
-                ],
-              ),
-            )
-          else if (isCompleted)
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.w),
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12.w),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Bootstrap.trophy_fill, color: Colors.green, size: 14.w),
-                  SizedBox(width: 6.w),
-                  Text(
-                    l10n.completed,
-                    style: TextStyle(
-                      fontSize: 12.sp,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.green,
-                    ),
+                  SizedBox(width: 10.w),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _formatDate(_selectedDate!, l10n),
+                        style: TextStyle(
+                          fontSize: 13.sp,
+                          fontWeight: FontWeight.w600,
+                          color: textColor,
+                        ),
+                      ),
+                      Text(
+                        isCompleted
+                            ? l10n.completed
+                            : canPlay
+                                ? l10n.notCompleted
+                                : l10n.comingSoon,
+                        style: TextStyle(
+                          fontSize: 10.sp,
+                          color: isCompleted ? Colors.green : theme.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-        ],
+
+            // Action button — fixed height so both states have same size
+            SizedBox(
+              height: 40.w,
+              child: canPlay && !isCompleted
+                  ? ElevatedButton(
+                      onPressed: () => _playChallenge(_selectedDate!),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryBlue,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(horizontal: 16.w),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12.w),
+                        ),
+                        elevation: 2,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Bootstrap.play_fill, size: 14.w),
+                          SizedBox(width: 6.w),
+                          Text(
+                            l10n.playNow,
+                            style: TextStyle(
+                              fontSize: 12.sp,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : isCompleted
+                      ? Container(
+                          padding: EdgeInsets.symmetric(horizontal: 16.w),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12.w),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Bootstrap.trophy_fill,
+                                  color: Colors.green, size: 14.w),
+                              SizedBox(width: 6.w),
+                              Text(
+                                l10n.completed,
+                                style: TextStyle(
+                                  fontSize: 12.sp,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -800,7 +803,10 @@ class _DailyChallengeScreenState extends ConsumerState<DailyChallengeScreen>
           dailyChallengeDate: date,
         ),
       ),
-    );
+    ).then((_) {
+      // Refresh UI when returning so completed state is immediately reflected
+      if (mounted) setState(() {});
+    });
   }
 
   String _getMonthName(AppLocalizations l10n, int month) {

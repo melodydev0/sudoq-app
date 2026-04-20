@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../models/cosmetic_rewards.dart';
+import '../utils/lottie_loader.dart';
 import '../utils/responsive_utils.dart';
 
 /// Premium animated avatar frame widget with double-layer design
@@ -499,6 +500,16 @@ class _AnimatedAvatarFrameState extends State<AnimatedAvatarFrame>
   }
 
   Widget _buildShimmerEffect(double size) {
+    return LottieLoader.lottieOrFallback(
+      assetPath: 'assets/lottie/frames/frame_shimmer.json',
+      width: size,
+      height: size,
+      repeat: true,
+      fallback: _buildProgrammaticShimmer(size),
+    );
+  }
+
+  Widget _buildProgrammaticShimmer(double size) {
     return AnimatedBuilder(
       animation: _shimmerAnimation,
       builder: (context, child) {
@@ -773,35 +784,57 @@ class FramePreview extends StatelessWidget {
       frame: isUnlocked ? frame : null,
       size: size,
       showAnimation: isUnlocked && isSelected,
-      child: Container(
-        width: innerSize,
-        height: innerSize,
-        decoration: BoxDecoration(
-          gradient: isUnlocked
-              ? LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: frame.gradientColors,
-                )
-              : null,
-          color: isUnlocked ? null : Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(innerSize * 0.2),
-          boxShadow: isUnlocked
-              ? [
-                  BoxShadow(
-                    color: frame.gradientColors.first.withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
+      child: _buildFrameContent(innerSize),
+    );
+  }
+
+  Widget _buildFrameContent(double innerSize) {
+    if (isUnlocked && frame.imagePath != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(innerSize * 0.2),
+        child: Image.asset(
+          frame.imagePath!,
+          width: innerSize,
+          height: innerSize,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildIconFallback(innerSize);
+          },
         ),
-        child: Center(
-          child: Icon(
-            frame.iconData ?? Icons.star,
-            color: isUnlocked ? Colors.white : Colors.grey,
-            size: innerSize * 0.5,
-          ),
+      );
+    }
+    return _buildIconFallback(innerSize);
+  }
+
+  Widget _buildIconFallback(double innerSize) {
+    return Container(
+      width: innerSize,
+      height: innerSize,
+      decoration: BoxDecoration(
+        gradient: isUnlocked
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: frame.gradientColors,
+              )
+            : null,
+        color: isUnlocked ? null : Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(innerSize * 0.2),
+        boxShadow: isUnlocked
+            ? [
+                BoxShadow(
+                  color: frame.gradientColors.first.withValues(alpha: 0.4),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Center(
+        child: Icon(
+          frame.iconData ?? Icons.star,
+          color: isUnlocked ? Colors.white : Colors.grey,
+          size: innerSize * 0.5,
         ),
       ),
     );

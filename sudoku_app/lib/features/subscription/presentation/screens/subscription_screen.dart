@@ -1,8 +1,12 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/services/purchase_service.dart';
+import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/paywall_analytics.dart';
+import '../../../../core/services/remote_config_service.dart';
 import '../../../../core/providers/app_providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -34,12 +38,16 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
   final List<Animation<Offset>> _featureSlides = [];
   final List<Animation<double>> _featureFades = [];
 
+  bool _isLoadingProducts = false;
+
   @override
   void initState() {
     super.initState();
     _initAnimations();
     _setupPurchaseListener();
     _loadProducts();
+    // Log paywall impression for A/B experiment tracking
+    PaywallAnalytics.logPaywallView();
   }
 
   void _setupPurchaseListener() {
@@ -55,11 +63,11 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
         case PurchaseResult.success:
           // Update provider
           ref.read(adsFreeProvider.notifier).state = true;
-          _showSuccessDialog(message ?? 'Premium activated!');
+          _showSuccessDialog(message ?? AppLocalizations.of(context).premiumActivated);
           break;
         case PurchaseResult.restored:
           ref.read(adsFreeProvider.notifier).state = true;
-          _showSuccessDialog(message ?? 'Purchase restored!');
+          _showSuccessDialog(message ?? AppLocalizations.of(context).purchaseRestored);
           break;
         case PurchaseResult.alreadyOwned:
           ref.read(adsFreeProvider.notifier).state = true;
@@ -70,7 +78,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
           break;
         case PurchaseResult.error:
           setState(() => _errorMessage = message);
-          _showErrorSnackbar(message ?? 'An error occurred');
+          _showErrorSnackbar(message ?? AppLocalizations.of(context).errorPrefix);
           break;
         case PurchaseResult.pending:
           // Still processing
@@ -80,14 +88,15 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
   }
 
   Future<void> _loadProducts() async {
-    // Reload products if not loaded
     if (!PurchaseService.hasProducts) {
+      setState(() => _isLoadingProducts = true);
       await PurchaseService.reloadProducts();
-      if (mounted) setState(() {});
+      if (mounted) setState(() => _isLoadingProducts = false);
     }
   }
 
   void _showSuccessDialog(String message) {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -110,7 +119,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
             ),
             const SizedBox(height: 16),
             Text(
-              'Welcome to Premium!',
+              l10n.welcomeToPremium,
               style: TextStyle(
                 fontSize: 20.sp,
                 fontWeight: FontWeight.w600,
@@ -143,9 +152,9 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
                   borderRadius: AppTheme.buttonRadius,
                 ),
               ),
-              child: const Text(
-                'Start Playing!',
-                style: TextStyle(
+              child: Text(
+                l10n.startPlaying,
+                style: const TextStyle(
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.3,
                 ),
@@ -158,12 +167,13 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
   }
 
   void _showErrorSnackbar(String message) {
+    final l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: AppColors.error,
         action: SnackBarAction(
-          label: 'Retry',
+          label: l10n.tryAgain,
           textColor: Colors.white,
           onPressed: _onPurchase,
         ),
@@ -199,7 +209,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
     )..repeat(reverse: true);
 
     // Staggered feature animations
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
       final startInterval = 0.1 + (i * 0.15);
       final endInterval = (startInterval + 0.3).clamp(0.0, 1.0);
 
@@ -235,26 +245,40 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
   }
 
   void _onPurchase() async {
-    if (_isLoading || _isRestoring) return;
+    if (_isLoading || _isRestoring || _isLoadingProducts) return;
+    if (!PurchaseService.hasProducts) return;
+
+    final hasPermanentAccount = AuthService.isSignedIn && !AuthService.isAnonymous;
+    if (!hasPermanentAccount) {
+      final signedIn = await _showAccountRequiredDialog();
+      if (!signedIn) return;
+    }
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    HapticFeedback.mediumImpact();
+    HapticService.mediumImpact();
+    PaywallAnalytics.logCtaTapped(_selectedPlan.name);
     await PurchaseService.buySubscription(_selectedPlan);
   }
 
   void _onRestore() async {
     if (_isLoading || _isRestoring) return;
 
+    final hasPermanentAccount = AuthService.isSignedIn && !AuthService.isAnonymous;
+    if (!hasPermanentAccount) {
+      final signedIn = await _showAccountRequiredDialog();
+      if (!signedIn) return;
+    }
+
     setState(() {
       _isRestoring = true;
       _errorMessage = null;
     });
 
-    HapticFeedback.lightImpact();
+    HapticService.lightImpact();
 
     final restored = await PurchaseService.restorePurchases();
 
@@ -266,11 +290,107 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
       final theme = AppThemeManager.colors;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('No previous purchases found'),
+          content: Text(AppLocalizations.of(context).noPreviousPurchases),
           backgroundColor: theme.textSecondary,
         ),
       );
     }
+  }
+
+  Future<bool> _showAccountRequiredDialog() async {
+    final theme = AppThemeManager.colors;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        bool isSigningIn = false;
+
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            Future<void> signInWithGoogle() async {
+              if (isSigningIn) return;
+              final navigator = Navigator.of(context);
+              setStateDialog(() => isSigningIn = true);
+              final cred = await AuthService.signInWithGoogle();
+              if (!navigator.mounted) return;
+              navigator.pop(cred?.user != null);
+            }
+
+            Future<void> signInWithApple() async {
+              if (isSigningIn) return;
+              final navigator = Navigator.of(context);
+              setStateDialog(() => isSigningIn = true);
+              final cred = await AuthService.signInWithApple();
+              if (!navigator.mounted) return;
+              navigator.pop(cred?.user != null);
+            }
+
+            return AlertDialog(
+              shape:
+                  const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+              title: Text(AppLocalizations.of(context).signInRequired),
+              content: Text(
+                defaultTargetPlatform == TargetPlatform.iOS
+                    ? 'To protect your subscription across devices and avoid purchase loss, '
+                      'please sign in with Google or Apple before purchasing premium.'
+                    : 'To protect your subscription across devices and avoid purchase loss, '
+                      'please sign in with Google before purchasing premium.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSigningIn
+                      ? null
+                      : () => Navigator.of(context).pop(false),
+                  child: Text(AppLocalizations.of(context).noThanks),
+                ),
+                if (defaultTargetPlatform == TargetPlatform.iOS)
+                  TextButton.icon(
+                    onPressed: isSigningIn ? null : signInWithApple,
+                    icon: const Icon(Icons.apple),
+                    label: const Text('Apple'),
+                  ),
+                FilledButton.icon(
+                  onPressed: isSigningIn ? null : signInWithGoogle,
+                  icon: isSigningIn
+                      ? SizedBox(
+                          width: 14.sp,
+                          height: 14.sp,
+                          child: const CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.login),
+                  label: const Text('Google'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.buttonPrimary,
+                    foregroundColor: theme.buttonText,
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context).signInSuccessful),
+          ),
+        );
+      }
+      return true;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).signInBeforePurchase),
+        ),
+      );
+    }
+    return false;
   }
 
   @override
@@ -455,6 +575,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
           Bootstrap.arrow_repeat, l10n.secondChances, AppColors.accentTeal),
       _FeatureItem(Bootstrap.lightning_charge_fill, l10n.smartPencil,
           AppColors.accentPurple),
+      _FeatureItem(Bootstrap.star_fill, l10n.xpBoost, AppColors.accentGold),
     ];
 
     return Column(
@@ -542,46 +663,50 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
     return Row(
       children: [
         _buildPlanCard(
-          SubscriptionPlan.weekly,
-          l10n.weekly,
-          PurchaseService.getPrice(SubscriptionPlan.weekly),
-          '',
-          theme,
-          size,
+          plan: SubscriptionPlan.weekly,
+          title: l10n.weekly,
+          savings: '',
+          theme: theme,
+          size: size,
         ),
-        SizedBox(width: size.width * 0.02),
+        SizedBox(width: size.width * 0.03),
         _buildPlanCard(
-          SubscriptionPlan.yearly,
-          l10n.yearly,
-          PurchaseService.getPrice(SubscriptionPlan.yearly),
-          l10n.save70,
-          theme,
-          size,
+          plan: SubscriptionPlan.yearly,
+          title: l10n.yearly,
+          savings: () {
+            // Remote Config can force a specific % (e.g. for marketing copy testing)
+            final rcPct = RemoteConfigService.yearlyBadgePct;
+            if (rcPct > 0) return l10n.savePercent(rcPct);
+            final pct = PurchaseService.getYearlySavingsPercent();
+            return pct != null ? l10n.savePercent(pct) : l10n.save70;
+          }(),
+          theme: theme,
+          size: size,
           isPopular: true,
-        ),
-        SizedBox(width: size.width * 0.02),
-        _buildPlanCard(
-          SubscriptionPlan.monthly,
-          l10n.monthly,
-          PurchaseService.getPrice(SubscriptionPlan.monthly),
-          l10n.save35,
-          theme,
-          size,
         ),
       ],
     );
   }
 
-  Widget _buildPlanCard(SubscriptionPlan plan, String title, String price,
-      String savings, AppThemeColors theme, Size size,
-      {bool isPopular = false}) {
+  Widget _buildPlanCard({
+    required SubscriptionPlan plan,
+    required String title,
+    required String savings,
+    required AppThemeColors theme,
+    required Size size,
+    bool isPopular = false,
+  }) {
     final l10n = AppLocalizations.of(context);
     final isSelected = _selectedPlan == plan;
+    final pricing = PurchaseService.getPlanPricing(plan);
+    final displayPrice = PurchaseService.getPrice(plan);
+    final hasIntro = pricing?.hasIntroOffer ?? false;
+    final regularPrice = pricing?.regularPrice;
 
     return Expanded(
       child: GestureDetector(
         onTap: () {
-          HapticFeedback.selectionClick();
+          HapticService.selectionClick();
           setState(() => _selectedPlan = plan);
         },
         child: AnimatedContainer(
@@ -653,14 +778,47 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
                 ),
               ),
               const SizedBox(height: 2),
-              Text(
-                price,
-                style: TextStyle(
-                  fontSize: 17.sp,
-                  fontWeight: FontWeight.w800,
-                  color: isSelected ? theme.accent : theme.textPrimary,
+
+              // Strikethrough regular price (shown only when intro offer exists)
+              if (hasIntro && regularPrice != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      regularPrice,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        fontWeight: FontWeight.w500,
+                        color: theme.textSecondary.withValues(alpha: 0.7),
+                        decoration: TextDecoration.lineThrough,
+                        decorationColor:
+                            theme.textSecondary.withValues(alpha: 0.7),
+                        decorationThickness: 2,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+
+              // Current price or loading placeholder
+              if (displayPrice != null)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    displayPrice,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 17.sp,
+                      fontWeight: FontWeight.w800,
+                      color: isSelected ? theme.accent : theme.textPrimary,
+                    ),
+                  ),
+                )
+              else
+                _buildPriceShimmer(theme),
+
+              // Savings badge (cross-plan comparison)
               if (savings.isNotEmpty)
                 Container(
                   margin: const EdgeInsets.only(top: 4),
@@ -680,6 +838,28 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
                     ),
                   ),
                 ),
+
+              // Weekly equivalent price (only on yearly card)
+              if (plan == SubscriptionPlan.yearly)
+                Builder(builder: (context) {
+                  final weeklyEq = PurchaseService.getYearlyWeeklyEquivalent();
+                  if (weeklyEq == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '≈ $weeklyEq/${AppLocalizations.of(context).weekly.toLowerCase()}',
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 8.sp,
+                          color: theme.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
             ],
           ),
         ),
@@ -689,28 +869,31 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
 
   Widget _buildAnimatedButton(
       AppLocalizations l10n, AppThemeColors theme, Size size) {
+    final bool canPurchase =
+        !_isLoading && !_isLoadingProducts && PurchaseService.hasProducts;
+
     return AnimatedBuilder(
       animation: _buttonController,
       builder: (context, child) {
         return GestureDetector(
-          onTap: _isLoading ? null : _onPurchase,
+          onTap: canPurchase ? _onPurchase : null,
           child: Container(
             width: double.infinity,
             height: size.height * 0.06,
             decoration: BoxDecoration(
-              color: _isLoading
-                  ? theme.textSecondary.withValues(alpha: 0.5)
-                  : theme.buttonPrimary,
+              color: canPurchase
+                  ? theme.buttonPrimary
+                  : theme.textSecondary.withValues(alpha: 0.5),
               borderRadius: AppTheme.cardRadius,
-              boxShadow: _isLoading
-                  ? null
-                  : [
+              boxShadow: canPurchase
+                  ? [
                       BoxShadow(
                         color: theme.textPrimary.withValues(alpha: 0.12),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
-                    ],
+                    ]
+                  : null,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -726,7 +909,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        'Processing...',
+                        l10n.processing,
                         style: TextStyle(
                           fontSize: 15.sp,
                           fontWeight: FontWeight.w600,
@@ -753,6 +936,17 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPriceShimmer(AppThemeColors theme) {
+    return Container(
+      width: 48,
+      height: 18,
+      decoration: BoxDecoration(
+        color: theme.textSecondary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
     );
   }
 }

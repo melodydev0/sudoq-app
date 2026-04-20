@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:sudoku_app/core/services/haptic_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:icons_plus/icons_plus.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -279,7 +279,7 @@ class _TrophyRoomScreenState extends ConsumerState<TrophyRoomScreen> {
     return GestureDetector(
       onTap: () {
         if (!isFuture) {
-          HapticFeedback.selectionClick();
+          HapticService.selectionClick();
           _showBadgeDetails(data, badgeInfo, l10n, theme);
         }
       },

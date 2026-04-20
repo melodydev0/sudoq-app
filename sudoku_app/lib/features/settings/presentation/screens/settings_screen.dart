@@ -1,21 +1,26 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_theme_manager.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/providers/app_providers.dart';
+import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/purchase_service.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../../../core/services/level_service.dart';
 import '../../../../core/services/achievement_service.dart';
 import '../../../../core/services/ads_service.dart';
-import '../../../../core/services/sound_service.dart';
 import '../../../../core/services/local_duel_stats_service.dart';
+import '../../../../core/services/notification_service.dart';
 import '../../../../core/models/statistics.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../subscription/presentation/screens/subscription_screen.dart';
+import '../../../onboarding/presentation/screens/welcome_screen.dart';
 import 'animations_debug_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -27,16 +32,26 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isRestoring = false;
-  bool _soundEnabled = true;
+  bool _pushNotificationsEnabled = true;
 
   @override
   void initState() {
     super.initState();
     PurchaseService.onPurchaseResult = _handlePurchaseResult;
-    _soundEnabled = SoundService().isSoundEnabled;
+    _pushNotificationsEnabled = NotificationService.isEnabled;
+  }
+
+  @override
+  void dispose() {
+    if (PurchaseService.onPurchaseResult == _handlePurchaseResult) {
+      PurchaseService.onPurchaseResult = null;
+    }
+    super.dispose();
   }
 
   void _handlePurchaseResult(PurchaseResult result, String? message) {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _isRestoring = false;
     });
@@ -47,7 +62,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case PurchaseResult.success:
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: Text(message ?? 'Ads-Free activated!'),
+            content: Text(message ?? l10n.premiumActivated),
             backgroundColor: AppColors.success,
           ),
         );
@@ -56,7 +71,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case PurchaseResult.restored:
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: Text(message ?? 'Purchase restored!'),
+            content: Text(message ?? l10n.purchaseRestored),
             backgroundColor: AppColors.success,
           ),
         );
@@ -64,14 +79,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         break;
       case PurchaseResult.alreadyOwned:
         scaffoldMessenger.showSnackBar(
-          SnackBar(content: Text(message ?? 'Already purchased!')),
+          SnackBar(content: Text(message ?? l10n.alreadyPurchased)),
         );
         ref.read(adsFreeProvider.notifier).state = true;
         break;
       case PurchaseResult.error:
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: Text(message ?? 'Purchase failed'),
+            content: Text(message ?? l10n.purchaseFailed),
             backgroundColor: AppColors.error,
           ),
         );
@@ -191,20 +206,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             },
                             theme: theme,
                           ),
-                          _buildDivider(),
-                          _buildSwitchTile(
-                            title: 'Sound Effects',
-                            subtitle:
-                                'Play sounds for correct inputs and completions',
-                            value: _soundEnabled,
-                            onChanged: (value) async {
-                              await SoundService().setSoundEnabled(value);
-                              setState(() {
-                                _soundEnabled = value;
-                              });
-                            },
-                            theme: theme,
-                          ),
                         ], theme),
 
                         const SizedBox(height: 24),
@@ -241,6 +242,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               ref
                                   .read(settingsProvider.notifier)
                                   .toggleVibration();
+                            },
+                            theme: theme,
+                          ),
+                        ], theme),
+
+                        const SizedBox(height: 24),
+
+                        // Notifications Section
+                        _buildSectionTitle(l10n.notifications, theme),
+                        _buildSettingsCard([
+                          _buildSwitchTile(
+                            title: l10n.pushNotifications,
+                            subtitle: l10n.pushNotificationsSubtitle,
+                            value: _pushNotificationsEnabled,
+                            onChanged: (value) async {
+                              await NotificationService.setEnabled(value);
+                              setState(() {
+                                _pushNotificationsEnabled = value;
+                              });
                             },
                             theme: theme,
                           ),
@@ -337,14 +357,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             icon: Icons.star_outline,
                             title: l10n.rateUs,
                             subtitle: l10n.rateUsSubtitle,
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(l10n.rateUsSubtitle),
-                                  backgroundColor: theme.card,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
+                            onTap: () async {
+                              final url = Uri.parse(
+                                'https://play.google.com/store/apps/details?id=com.sudoq.app',
                               );
+                              if (await canLaunchUrl(url)) {
+                                await launchUrl(url, mode: LaunchMode.externalApplication);
+                              }
                             },
                             theme: theme,
                           ),
@@ -354,11 +373,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             title: l10n.shareApp,
                             subtitle: l10n.shareAppSubtitle,
                             onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(l10n.shareAppSubtitle),
-                                  backgroundColor: theme.card,
-                                  behavior: SnackBarBehavior.floating,
+                              SharePlus.instance.share(
+                                ShareParams(
+                                  text: '${AppConstants.appName} - Zen Sudoku Puzzle\nhttps://play.google.com/store/apps/details?id=com.sudoq.app',
                                 ),
                               );
                             },
@@ -368,14 +385,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           _buildActionTile(
                             icon: Icons.privacy_tip_outlined,
                             title: l10n.privacyPolicy,
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(l10n.privacyPolicy),
-                                  backgroundColor: theme.card,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
+                            onTap: () async {
+                              final url = Uri.parse(AppConstants.privacyPolicyUrl);
+                              if (await canLaunchUrl(url)) {
+                                await launchUrl(url, mode: LaunchMode.externalApplication);
+                              }
                             },
                             theme: theme,
                           ),
@@ -383,211 +397,245 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           _buildActionTile(
                             icon: Icons.description_outlined,
                             title: l10n.termsOfService,
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(l10n.termsOfService),
-                                  backgroundColor: theme.card,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
+                            onTap: () async {
+                              final url = Uri.parse(AppConstants.termsOfServiceUrl);
+                              if (await canLaunchUrl(url)) {
+                                await launchUrl(url, mode: LaunchMode.externalApplication);
+                              }
+                            },
+                            theme: theme,
+                          ),
+                          _buildDivider(),
+                          _buildActionTile(
+                            icon: Icons.mail_outline,
+                            title: l10n.contactUs,
+                            subtitle: 'support@sudoq.app',
+                            onTap: () async {
+                              final url = Uri.parse('mailto:support@sudoq.app?subject=SudoQ%20Support');
+                              if (await canLaunchUrl(url)) {
+                                await launchUrl(url);
+                              }
                             },
                             theme: theme,
                           ),
                         ], theme),
 
-                        const SizedBox(height: 24),
+                        // Account Section (only for signed-in non-anonymous users)
+                        if (AuthService.isSignedIn && !AuthService.isAnonymous) ...[
+                          const SizedBox(height: 24),
+                          _buildSectionTitle(l10n.account, theme),
+                          _buildSettingsCard([
+                            _buildActionTile(
+                              icon: Icons.logout,
+                              title: l10n.signOut,
+                              onTap: () => _showSignOutDialog(theme, l10n),
+                              theme: theme,
+                            ),
+                            _buildDivider(),
+                            _buildActionTile(
+                              icon: Icons.delete_forever,
+                              title: l10n.deleteAccount,
+                              subtitle: l10n.deleteAccountWarning,
+                              onTap: () => _showDeleteAccountDialog(theme, l10n),
+                              theme: theme,
+                            ),
+                          ], theme),
+                        ],
 
-                        // Debug Section (for testing) - Always visible for now
-                        _buildSectionTitle('🔧 Debug Mode', theme),
-                        _buildSettingsCard([
-                          _buildActionTile(
-                            icon: Icons.animation,
-                            title: 'Test Animations',
-                            subtitle: 'Rank-up, victory/defeat badges',
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const AnimationsDebugScreen(),
-                                ),
-                              );
-                            },
-                            theme: theme,
-                          ),
-                          _buildDivider(),
-                          _buildSwitchTile(
-                            title: 'Premium / Ads-Free',
-                            subtitle: isAdsFree
-                                ? '✅ Premium Active (No Ads)'
-                                : '❌ Free Version (Ads Enabled)',
-                            value: isAdsFree,
-                            onChanged: (value) async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              await StorageService.setAdsFree(value);
-                              ref.read(adsFreeProvider.notifier).state = value;
+                        if (kDebugMode) ...[
+                          const SizedBox(height: 24),
+                          _buildSectionTitle('🔧 Debug Mode', theme),
+                          _buildSettingsCard([
+                            _buildActionTile(
+                              icon: Icons.animation,
+                              title: 'Test Animations + All Buttons',
+                              subtitle:
+                                  'All animations + all app button styles',
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const AnimationsDebugScreen(),
+                                  ),
+                                );
+                              },
+                              theme: theme,
+                            ),
+                            _buildDivider(),
+                            _buildSwitchTile(
+                              title: 'Premium / Ads-Free',
+                              subtitle: isAdsFree
+                                  ? '✅ Premium Active (No Ads)'
+                                  : '❌ Free Version (Ads Enabled)',
+                              value: isAdsFree,
+                              onChanged: (value) async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                await StorageService.setAdsFree(value);
+                                ref.read(adsFreeProvider.notifier).state = value;
 
-                              if (value) {
-                                AdsService.onAdsFreeActivated();
+                                if (value) {
+                                  AdsService.onAdsFreeActivated();
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: const Text(
+                                          '✅ Premium Activated! (Debug Mode)'),
+                                      backgroundColor: theme.success,
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                } else {
+                                  AdsService.init();
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: const Text(
+                                          '❌ Premium Deactivated (Debug Mode)'),
+                                      backgroundColor: theme.warning,
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                                setState(() {});
+                              },
+                              theme: theme,
+                            ),
+                            _buildDivider(),
+                            _buildActionTile(
+                              icon: Icons.military_tech,
+                              title: 'Max Level (100) + All Rewards',
+                              subtitle: 'Unlock everything for testing',
+                              onTap: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                await LevelService.setMaxLevel();
+                                if (!mounted) return;
                                 messenger.showSnackBar(
                                   SnackBar(
                                     content: const Text(
-                                        '✅ Premium Activated! (Debug Mode)'),
+                                        '✅ Level 100 + All Rewards Unlocked!'),
                                     backgroundColor: theme.success,
                                     behavior: SnackBarBehavior.floating,
                                   ),
                                 );
-                              } else {
-                                AdsService.init();
+                              },
+                              theme: theme,
+                            ),
+                            _buildDivider(),
+                            _buildActionTile(
+                              icon: Icons.emoji_events,
+                              title: 'Unlock All Achievements',
+                              subtitle:
+                                  'All achievements + Stats + Duel (60 total)',
+                              onTap: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+
+                                // 1. Update AchievementService data (unlocked IDs)
+                                await AchievementService.unlockAll();
+
+                                // 2. Update Statistics for normal achievements progress
+                                final maxStats = Statistics(
+                                  totalGamesPlayed: 500,
+                                  totalGamesWon: 450,
+                                  totalGamesLost: 50,
+                                  currentStreak: 30,
+                                  bestStreak: 30,
+                                  totalPlayTime: 360000, // 100 hours
+                                  difficultyStats: {
+                                    'Easy': DifficultyStats(
+                                        gamesPlayed: 150,
+                                        gamesWon: 140,
+                                        bestTime: 60,
+                                        bestScore: 10000),
+                                    'Medium': DifficultyStats(
+                                        gamesPlayed: 150,
+                                        gamesWon: 130,
+                                        bestTime: 180,
+                                        bestScore: 12000),
+                                    'Hard': DifficultyStats(
+                                        gamesPlayed: 100,
+                                        gamesWon: 90,
+                                        bestTime: 300,
+                                        bestScore: 15000),
+                                    'Expert': DifficultyStats(
+                                        gamesPlayed: 100,
+                                        gamesWon: 90,
+                                        bestTime: 600,
+                                        bestScore: 20000),
+                                  },
+                                  totalHintsUsed: 1000,
+                                  perfectGames: 130,
+                                  uniqueDaysPlayed: List.generate(
+                                      365,
+                                      (i) =>
+                                          '2025-01-${(i % 28 + 1).toString().padLeft(2, '0')}'),
+                                  totalDailyChallengesCompleted: 100,
+                                );
+                                await ref
+                                    .read(statisticsProvider.notifier)
+                                    .updateStatistics(maxStats);
+
+                                // 3. Update Duel stats for duel achievements
+                                await LocalDuelStatsService.setDebugStats(
+                                  wins: 500,
+                                  losses: 50,
+                                  elo: 2500, // Champion level
+                                  bestStreak: 15,
+                                  currentStreak: 10,
+                                );
+                                // Sync to cloud so duel leaderboard reflects debug rank
+                                await AuthService.syncDuelLeaderboard(2500);
+
+                                // 4. Refresh achievements provider with actual data
+                                ref
+                                    .read(achievementsDataProvider.notifier)
+                                    .refresh();
+
+                                if (!mounted) return;
                                 messenger.showSnackBar(
                                   SnackBar(
                                     content: const Text(
-                                        '❌ Premium Deactivated (Debug Mode)'),
+                                        '✅ All Achievements Unlocked! (Stats + Duel + Rewards)'),
+                                    backgroundColor: theme.success,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                                setState(() {});
+                              },
+                              theme: theme,
+                            ),
+                            _buildDivider(),
+                            _buildActionTile(
+                              icon: Icons.restart_alt,
+                              title: 'Reset Everything',
+                              subtitle: 'Reset level, achievements, stats',
+                              onTap: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                await StorageService.clearAll();
+                                await LevelService.resetLevelData();
+                                await AchievementService.reset();
+                                await LocalDuelStatsService.resetAll();
+                                ref.read(statisticsProvider.notifier).reset();
+                                ref
+                                    .read(achievementsDataProvider.notifier)
+                                    .reset();
+                                await StorageService.setAdsFree(false);
+                                ref.read(adsFreeProvider.notifier).state = false;
+                                AdsService.init();
+                                if (!mounted) return;
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: const Text(
+                                        '🔄 Everything Reset! Restart app for best results.'),
                                     backgroundColor: theme.warning,
                                     behavior: SnackBarBehavior.floating,
                                   ),
                                 );
-                              }
-                              setState(() {});
-                            },
-                            theme: theme,
-                          ),
-                          _buildDivider(),
-                          _buildActionTile(
-                            icon: Icons.military_tech,
-                            title: 'Max Level (100) + All Rewards',
-                            subtitle: 'Unlock everything for testing',
-                            onTap: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              await LevelService.setMaxLevel();
-                              if (!mounted) return;
-                              messenger.showSnackBar(
-                                SnackBar(
-                                  content: const Text(
-                                      '✅ Level 100 + All Rewards Unlocked!'),
-                                  backgroundColor: theme.success,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            },
-                            theme: theme,
-                          ),
-                          _buildDivider(),
-                          _buildActionTile(
-                            icon: Icons.emoji_events,
-                            title: 'Unlock All Achievements',
-                            subtitle:
-                                'All achievements + Stats + Duel (60 total)',
-                            onTap: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-
-                              // 1. Update AchievementService data (unlocked IDs)
-                              await AchievementService.unlockAll();
-
-                              // 2. Update Statistics for normal achievements progress
-                              final maxStats = Statistics(
-                                totalGamesPlayed: 500,
-                                totalGamesWon: 450,
-                                totalGamesLost: 50,
-                                currentStreak: 30,
-                                bestStreak: 30,
-                                totalPlayTime: 360000, // 100 hours
-                                difficultyStats: {
-                                  'Easy': DifficultyStats(
-                                      gamesPlayed: 150,
-                                      gamesWon: 140,
-                                      bestTime: 60,
-                                      bestScore: 10000),
-                                  'Medium': DifficultyStats(
-                                      gamesPlayed: 150,
-                                      gamesWon: 130,
-                                      bestTime: 180,
-                                      bestScore: 12000),
-                                  'Hard': DifficultyStats(
-                                      gamesPlayed: 100,
-                                      gamesWon: 90,
-                                      bestTime: 300,
-                                      bestScore: 15000),
-                                  'Expert': DifficultyStats(
-                                      gamesPlayed: 100,
-                                      gamesWon: 90,
-                                      bestTime: 600,
-                                      bestScore: 20000),
-                                },
-                                totalHintsUsed: 1000,
-                                perfectGames: 130,
-                                uniqueDaysPlayed: List.generate(
-                                    365,
-                                    (i) =>
-                                        '2025-01-${(i % 28 + 1).toString().padLeft(2, '0')}'),
-                                totalDailyChallengesCompleted: 100,
-                              );
-                              await ref
-                                  .read(statisticsProvider.notifier)
-                                  .updateStatistics(maxStats);
-
-                              // 3. Update Duel stats for duel achievements
-                              await LocalDuelStatsService.setDebugStats(
-                                wins: 500,
-                                losses: 50,
-                                elo: 2500, // Champion level
-                                bestStreak: 15,
-                                currentStreak: 10,
-                              );
-
-                              // 4. Refresh achievements provider with actual data
-                              ref
-                                  .read(achievementsDataProvider.notifier)
-                                  .refresh();
-
-                              if (!mounted) return;
-                              messenger.showSnackBar(
-                                SnackBar(
-                                  content: const Text(
-                                      '✅ All Achievements Unlocked! (Stats + Duel + Rewards)'),
-                                  backgroundColor: theme.success,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                              setState(() {});
-                            },
-                            theme: theme,
-                          ),
-                          _buildDivider(),
-                          _buildActionTile(
-                            icon: Icons.restart_alt,
-                            title: 'Reset Everything',
-                            subtitle: 'Reset level, achievements, stats',
-                            onTap: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              await StorageService.clearAll();
-                              await LevelService.resetLevelData();
-                              await AchievementService.reset();
-                              await LocalDuelStatsService.resetAll();
-                              ref.read(statisticsProvider.notifier).reset();
-                              ref
-                                  .read(achievementsDataProvider.notifier)
-                                  .reset();
-                              await StorageService.setAdsFree(false);
-                              ref.read(adsFreeProvider.notifier).state = false;
-                              AdsService.init();
-                              if (!mounted) return;
-                              messenger.showSnackBar(
-                                SnackBar(
-                                  content: const Text(
-                                      '🔄 Everything Reset! Restart app for best results.'),
-                                  backgroundColor: theme.warning,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                              setState(() {});
-                            },
-                            theme: theme,
-                          ),
-                        ], theme),
-
-                        const SizedBox(height: 24),
+                                setState(() {});
+                              },
+                              theme: theme,
+                            ),
+                          ], theme),
+                          const SizedBox(height: 24),
+                        ],
 
                         // Version
                         Center(
@@ -689,6 +737,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -702,10 +751,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Center(
               child: Container(
                 width: 40,
@@ -797,6 +847,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const SizedBox(height: 20),
           ],
+        ),
         ),
       ),
     );
@@ -1035,6 +1086,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   void _showLanguageSelector(AppThemeColors theme) {
     final settings = ref.read(settingsProvider);
+    final l10n = AppLocalizations.of(context);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1066,7 +1118,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             Padding(
               padding: const EdgeInsets.all(20),
               child: Text(
-                'Select Language',
+                l10n.selectLanguage,
                 style: TextStyle(
                   fontSize: 20.sp,
                   fontWeight: FontWeight.w600,
@@ -1081,7 +1133,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 children: [
                   _buildLanguageOption(
                     flag: '🌐',
-                    name: 'System Default',
+                    name: l10n.systemDefault,
                     nativeName: '',
                     code: '',
                     isSelected: settings.languageCode.isEmpty,
@@ -1148,6 +1200,139 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             );
         Navigator.pop(context);
       },
+    );
+  }
+
+  void _showSignOutDialog(AppThemeColors theme, AppLocalizations l10n) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: theme.card,
+        shape: const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+        title: Text(
+          l10n.signOut,
+          style: TextStyle(color: theme.textPrimary),
+        ),
+        content: Text(
+          l10n.signOutConfirm,
+          style: TextStyle(color: theme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(l10n.cancel, style: TextStyle(color: theme.textMuted)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final nav = Navigator.of(context);
+              Navigator.pop(dialogCtx);
+              await AuthService.signOut();
+              if (!mounted) return;
+              nav.pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                (route) => false,
+              );
+            },
+            child: Text(l10n.signOut, style: TextStyle(color: theme.warning)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog(AppThemeColors theme, AppLocalizations l10n) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: theme.card,
+        shape: const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+        title: Text(
+          l10n.deleteAccountConfirm,
+          style: TextStyle(color: theme.textPrimary),
+        ),
+        content: Text(
+          l10n.deleteAccountWarning,
+          style: TextStyle(color: theme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(l10n.cancel, style: TextStyle(color: theme.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _showDeleteAccountFinalDialog(theme, l10n);
+            },
+            child: Text(
+              l10n.delete,
+              style: const TextStyle(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteAccountFinalDialog(AppThemeColors theme, AppLocalizations l10n) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: theme.card,
+        shape: const RoundedRectangleBorder(borderRadius: AppTheme.cardRadius),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                l10n.deleteAccountFinalConfirm,
+                style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          l10n.deleteAccountFinalWarning,
+          style: TextStyle(color: theme.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(l10n.cancel, style: TextStyle(color: theme.textMuted)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final nav = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogCtx);
+              final success = await AuthService.deleteAccount();
+              if (!mounted) return;
+              if (success) {
+                await LevelService.resetLevelData();
+                await StorageService.clearAll();
+                await StorageService.init();
+                if (!mounted) return;
+                nav.pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                  (route) => false,
+                );
+              } else {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('${l10n.errorPrefix}: ${l10n.deleteAccount}'),
+                    backgroundColor: AppColors.error,
+                  ),
+                );
+              }
+            },
+            child: Text(
+              l10n.delete,
+              style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

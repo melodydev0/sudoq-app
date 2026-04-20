@@ -3,8 +3,8 @@ class AppConstants {
   AppConstants._();
 
   // App Info
-  static const String appName = 'Classic Sudoku';
-  static const String appVersion = '1.0.0';
+  static const String appName = 'SudoQ';
+  static const String appVersion = '1.0.3';
 
   // Grid sizes
   static const int gridSize9x9 = 9;
@@ -14,15 +14,22 @@ class AppConstants {
 
   // Game settings
   static const int maxMistakes = 3;
-  static const int maxHints = 2; // Free hints reduced to 2
+  /// Max hints per game (same for free and premium).
+  static const int maxHints = 5;
+  /// Free users: this many hints per game without watching an ad; rest require ad.
+  static const int freeHintsWithoutAd = 2;
   static const int scorePerCell = 10;
   static const int scorePerHint = -50;
   static const int scorePerfectGame = 500;
 
+  /// Second chance limits per game
+  static const int maxSecondChancesFree = 1;    // Free users: 1 per game (via ad)
+  static const int maxSecondChancesPremium = 2; // Premium users: 2 per game (free)
+
   // Ad rewards
-  static const int adsForHint = 1; // Watch 1 ad for extra hint
+  static const int adsForHint = 1; // Watch 1 ad for one extra hint (free users, after freeHintsWithoutAd)
   static const int adsForFastPencil = 1; // Watch 1 ad to unlock fast pencil
-  static const int adsForSecondChance = 3; // Watch 3 ads for second chance
+  static const int adsForSecondChance = 1; // Watch 1 ad for second chance (free users)
 
   // Difficulty levels
   static const List<String> difficultyLevels = [
@@ -55,30 +62,70 @@ class AppConstants {
   static const String keySoundEnabled = 'sound_enabled';
   static const String keyDailyChallenge = 'daily_challenge';
   static const String keyFavorites = 'favorites';
+  static const String keyPushNotificationsEnabled = 'push_notifications_enabled';
 
-  // AdMob IDs (Test IDs - Replace with real ones before release)
-  static const String admobAppId = 'ca-app-pub-3940256099942544~3347511713';
-  static const String bannerAdUnitId = 'ca-app-pub-3940256099942544/6300978111';
-  static const String interstitialAdUnitId =
+  // AdMob IDs
+  // Real IDs for production; debug mode overrides these with test IDs in AdsService.
+  static const String admobAppId = String.fromEnvironment(
+    'ADMOB_APP_ID',
+    defaultValue: 'ca-app-pub-4679569583423185~4086488817',
+  );
+  static const String bannerAdUnitId = String.fromEnvironment(
+    'ADMOB_BANNER_AD_UNIT_ID',
+    defaultValue: 'ca-app-pub-4679569583423185/6770769586',
+  );
+  static const String interstitialAdUnitId = String.fromEnvironment(
+    'ADMOB_INTERSTITIAL_AD_UNIT_ID',
+    defaultValue: 'ca-app-pub-4679569583423185/5336825459',
+  );
+  static const String rewardedAdUnitId = String.fromEnvironment(
+    'ADMOB_REWARDED_AD_UNIT_ID',
+    defaultValue: 'ca-app-pub-4679569583423185/2710662116',
+  );
+
+  static const String _googleTestAdmobAppId =
+      'ca-app-pub-3940256099942544~3347511713';
+  static const String _googleTestBannerAdUnitId =
+      'ca-app-pub-3940256099942544/6300978111';
+  static const String _googleTestInterstitialAdUnitId =
       'ca-app-pub-3940256099942544/1033173712';
-  static const String rewardedAdUnitId =
+  static const String _googleTestRewardedAdUnitId =
       'ca-app-pub-3940256099942544/5224354917';
 
-  // In-App Purchase IDs (Replace before release)
-  // These IDs must match EXACTLY with Google Play Console & App Store Connect
-  static const String subscriptionWeeklyId = 'sudoku_premium_weekly';
-  static const String subscriptionMonthlyId = 'sudoku_premium_monthly';
-  static const String subscriptionYearlyId = 'sudoku_premium_yearly';
+  static bool get isUsingTestAdMobIds {
+    return admobAppId == _googleTestAdmobAppId ||
+        bannerAdUnitId == _googleTestBannerAdUnitId ||
+        interstitialAdUnitId == _googleTestInterstitialAdUnitId ||
+        rewardedAdUnitId == _googleTestRewardedAdUnitId;
+  }
 
-  // All subscription product IDs
+  // ── In-App Purchase ─────────────────────────────────────────────
+  // Google Play: single subscription with 2 active base plans + yearly intro offer
+  static const String googlePlaySubscriptionId = 'sudoq_premium';
+  static const String basePlanWeekly = 'weekly';
+  static const String basePlanYearly = 'yearly';
+
+  // iOS App Store: separate subscription products (same subscription group)
+  static const String iosWeeklyId = 'sudoq_premium_weekly';
+  static const String iosYearlyId = 'sudoq_premium_yearly';
+  static const Set<String> iosSubscriptionIds = {
+    iosWeeklyId,
+    iosYearlyId,
+  };
+
+  // All valid product IDs accepted by server-side verification
   static const Set<String> subscriptionIds = {
-    subscriptionWeeklyId,
-    subscriptionMonthlyId,
-    subscriptionYearlyId,
+    googlePlaySubscriptionId,
+    iosWeeklyId,
+    iosYearlyId,
   };
 
   // Legacy (keep for backward compatibility)
   static const String adsFreeProductId = 'ads_free_purchase';
+
+  // URLs
+  static const String privacyPolicyUrl = 'https://gotips.web.tr/privacy-policy2.html';
+  static const String termsOfServiceUrl = 'https://gotips.web.tr/terms-of-service-sudoq.html';
 
   // Animation durations
   static const Duration shortAnimation = Duration(milliseconds: 200);

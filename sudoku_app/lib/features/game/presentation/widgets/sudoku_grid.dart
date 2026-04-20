@@ -3,6 +3,8 @@ import '../../../../core/models/game_state.dart';
 import '../../../../core/models/cosmetic_rewards.dart';
 import '../../../../core/services/level_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme_manager.dart';
+import '../../../../core/utils/lottie_loader.dart';
 
 /// Data class for tracking completed sections
 class CompletedSection {
@@ -17,7 +19,7 @@ class CompletedSection {
   });
 
   bool get isAnimating {
-    return DateTime.now().difference(completedAt).inMilliseconds < 650;
+    return DateTime.now().difference(completedAt).inMilliseconds < 420;
   }
 }
 
@@ -28,6 +30,7 @@ class SudokuGrid extends StatefulWidget {
   final Function(int row, int col) onCellTap;
   final bool useCustomTheme;
   final List<CompletedSection> completedSections;
+  final Set<int> droppingCells;
 
   const SudokuGrid({
     super.key,
@@ -37,6 +40,7 @@ class SudokuGrid extends StatefulWidget {
     required this.onCellTap,
     this.useCustomTheme = true,
     this.completedSections = const [],
+    this.droppingCells = const {},
   });
 
   @override
@@ -47,9 +51,32 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
   final Map<String, AnimationController> _animationControllers = {};
   final Map<String, Animation<double>> _animations = {};
 
+  // Drop animation controllers for auto-complete cells
+  final Map<int, AnimationController> _dropControllers = {};
+  final Map<int, Animation<double>> _dropAnimations = {};
+  final Map<int, Animation<double>> _dropBounceAnimations = {};
+
   @override
   void didUpdateWidget(SudokuGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // Trigger drop animations for newly dropping cells
+    for (final cellKey in widget.droppingCells) {
+      if (!_dropControllers.containsKey(cellKey)) {
+        _createDropAnimation(cellKey);
+      }
+    }
+    // Clean up finished drop animations
+    final dropKeysToRemove = _dropControllers.keys
+        .where((k) => !widget.droppingCells.contains(k) &&
+            (_dropControllers[k]?.isCompleted ?? true))
+        .toList();
+    for (final key in dropKeysToRemove) {
+      _dropControllers[key]?.dispose();
+      _dropControllers.remove(key);
+      _dropAnimations.remove(key);
+      _dropBounceAnimations.remove(key);
+    }
 
     // Check for new completed sections
     for (var section in widget.completedSections) {
@@ -78,7 +105,7 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
 
   void _createAnimationForSection(String key) {
     final controller = AnimationController(
-      duration: const Duration(milliseconds: 580),
+      duration: const Duration(milliseconds: 380),
       vsync: this,
     );
 
@@ -115,9 +142,35 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
     });
   }
 
+  void _createDropAnimation(int cellKey) {
+    final controller = AnimationController(
+      duration: const Duration(milliseconds: 420),
+      vsync: this,
+    );
+
+    // Drop from above with bounce
+    final dropAnim = Tween<double>(begin: -1.0, end: 0.0).animate(
+      CurvedAnimation(parent: controller, curve: Curves.bounceOut),
+    );
+
+    // Scale: start small, overshoot slightly, settle to 1.0
+    final bounceAnim = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: controller, curve: Curves.elasticOut),
+    );
+
+    _dropControllers[cellKey] = controller;
+    _dropAnimations[cellKey] = dropAnim;
+    _dropBounceAnimations[cellKey] = bounceAnim;
+
+    controller.forward();
+  }
+
   @override
   void dispose() {
     for (var controller in _animationControllers.values) {
+      controller.dispose();
+    }
+    for (var controller in _dropControllers.values) {
       controller.dispose();
     }
     super.dispose();
@@ -137,20 +190,19 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
     final size = widget.gameState.gridSize;
     final boxSize = size == 9 ? 3 : 4;
 
-    // Use system dark mode setting, NOT app theme (grid should be independent)
-    final platformBrightness = MediaQuery.of(context).platformBrightness;
-    final isDark = platformBrightness == Brightness.dark;
+    // Use app theme manager for consistent dark/light mode detection
+    final isDark = AppThemeManager.colors.isDark;
 
-    // Apply GRID STYLE colors if available (not ranked app themes)
-    final theme = _gridStyle;
+    // Apply GRID STYLE colors ONLY in light mode - dark mode always uses dark colors
+    final theme = isDark ? null : _gridStyle;
 
-    // Grid uses its own colors - harmonious with app palette when no theme
-    final gridBorderColor = theme != null
-        ? theme.primaryColor
-        : (isDark ? AppColors.primaryLight : AppColors.primary);
-    final gridBackgroundColor = theme != null
-        ? theme.backgroundColor
-        : (isDark ? AppColors.surfaceDark : AppColors.surfaceLight);
+    // Grid uses dark colors in dark mode, theme colors or light colors otherwise
+    final gridBorderColor = isDark
+        ? AppColors.primaryLight
+        : (theme?.primaryColor ?? AppColors.primary);
+    final gridBackgroundColor = isDark
+        ? AppColors.surfaceDark
+        : (theme?.backgroundColor ?? AppColors.surfaceLight);
 
     // Default grid style values
     const borderRadius = 0.0;
@@ -233,16 +285,22 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
             if (value <= 0) return const SizedBox.shrink();
 
             return IgnorePointer(
-              child: CustomPaint(
-                size: Size(constraints.maxWidth, constraints.maxHeight),
-                painter: _CompletionEffectPainter(
-                  type: section.type,
-                  index: section.index,
-                  progress: value,
-                  cellSize: cellSize,
-                  boxSize: boxSize,
-                  gridSize: size,
-                  isDark: isDark,
+              child: LottieLoader.lottieOrFallback(
+                assetPath: 'assets/lottie/effects/row_complete.json',
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                fit: BoxFit.fill,
+                fallback: CustomPaint(
+                  size: Size(constraints.maxWidth, constraints.maxHeight),
+                  painter: _CompletionEffectPainter(
+                    type: section.type,
+                    index: section.index,
+                    progress: value,
+                    cellSize: cellSize,
+                    boxSize: boxSize,
+                    gridSize: size,
+                    isDark: isDark,
+                  ),
                 ),
               ),
             );
@@ -256,7 +314,8 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
 
   Widget _buildCell(BuildContext context, int row, int col, int size,
       int boxSize, double cellSize, double cellSpacing, double borderRadius) {
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    // Use app theme manager for consistent dark/light mode detection
+    final isDark = AppThemeManager.colors.isDark;
     final value = widget.gameState.currentGrid[row][col];
     final isFixed = widget.gameState.isFixedCell(row, col);
     final isSelected = row == widget.selectedRow && col == widget.selectedCol;
@@ -275,35 +334,34 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
     final isError = value != 0 && value != widget.gameState.solution[row][col];
     final notes = widget.gameState.notes[row][col];
 
-    // Apply GRID STYLE colors (harmonious, warm palette when no theme)
-    final theme = _gridStyle;
-    final backgroundColor = theme?.backgroundColor ??
-        (isDark ? AppColors.surfaceDark : AppColors.surfaceLight);
-    final selectedColor = theme != null
-        ? theme.primaryColor.withValues(alpha: 0.4)
-        : (isDark
-            ? AppColors.primaryLight.withValues(alpha: 0.35)
-            : AppColors.primary.withValues(alpha: 0.2));
-    final highlightColor = theme?.cellHighlightColor ??
-        (isDark ? const Color(0xFF2A292E) : const Color(0xFFEBE8E2));
-    final sameNumberColor = theme != null
-        ? theme.secondaryColor.withValues(alpha: 0.3)
-        : (isDark
-            ? AppColors.primaryLight.withValues(alpha: 0.2)
-            : AppColors.primary.withValues(alpha: 0.12));
+    // Apply GRID STYLE colors ONLY in light mode - dark mode always uses dark colors
+    final theme = isDark ? null : _gridStyle;
+    
+    // Dark mode uses dedicated dark colors for proper contrast
+    final backgroundColor = isDark
+        ? AppColors.surfaceDark
+        : (theme?.backgroundColor ?? AppColors.surfaceLight);
+    final selectedColor = isDark
+        ? AppColors.primaryLight.withValues(alpha: 0.35)
+        : (theme?.primaryColor.withValues(alpha: 0.4) ??
+            AppColors.primary.withValues(alpha: 0.2));
+    final highlightColor = isDark
+        ? const Color(0xFF2A292E)
+        : (theme?.cellHighlightColor ?? const Color(0xFFEBE8E2));
+    final sameNumberColor = isDark
+        ? AppColors.primaryLight.withValues(alpha: 0.2)
+        : (theme?.secondaryColor.withValues(alpha: 0.3) ??
+            AppColors.primary.withValues(alpha: 0.12));
     final errorColor = isDark
         ? const Color(0xFF5C2A2A)
         : AppColors.error.withValues(alpha: 0.25);
     final gridLineColor =
         isDark ? const Color(0xFF3A393E) : const Color(0xFFE0DED9);
-    final primaryColor = isDark ? AppColors.primaryLight : AppColors.primary;
 
     Color bgColor = backgroundColor;
-    Color? borderColor;
 
     if (isSelected) {
       bgColor = selectedColor;
-      borderColor = primaryColor;
     } else if (isSameNumber && value != 0) {
       bgColor = sameNumberColor;
     } else if (isInSameRowOrCol || isInSameBox) {
@@ -314,54 +372,91 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
       bgColor = errorColor;
     }
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        widget.onCellTap(row, col);
-      },
-      child: Container(
-        width: cellSize,
-        height: cellSize,
-        decoration: BoxDecoration(
-          color: bgColor,
-          border: Border(
-            right: BorderSide(
-              color: (col + 1) % boxSize == 0 && col != size - 1
-                  ? Colors.transparent
-                  : gridLineColor,
-              width: 1,
-            ),
-            bottom: BorderSide(
-              color: (row + 1) % boxSize == 0 && row != size - 1
-                  ? Colors.transparent
-                  : gridLineColor,
-              width: 1,
+    return Semantics(
+      label: 'Row ${row + 1}, Column ${col + 1}',
+      value: value != 0
+          ? (size == 16 && value > 9
+              ? String.fromCharCode(65 + value - 10)
+              : '$value')
+          : 'empty',
+      hint: isFixed ? 'fixed' : (isError ? 'incorrect' : 'editable'),
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          widget.onCellTap(row, col);
+        },
+        child: Container(
+          width: cellSize,
+          height: cellSize,
+          decoration: BoxDecoration(
+            color: bgColor,
+            border: Border(
+              right: BorderSide(
+                color: (col + 1) % boxSize == 0 && col != size - 1
+                    ? Colors.transparent
+                    : gridLineColor,
+                width: 1,
+              ),
+              bottom: BorderSide(
+                color: (row + 1) % boxSize == 0 && row != size - 1
+                    ? Colors.transparent
+                    : gridLineColor,
+                width: 1,
+              ),
             ),
           ),
+          child: _buildCellContentWithDrop(
+              context, row, col, value, isFixed, isError, notes, size, cellSize),
         ),
-        child: borderColor != null
-            ? Container(
-                margin: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  border: Border.all(color: borderColor, width: 2),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: _buildCellContent(
-                    context, value, isFixed, isError, notes, size),
-              )
-            : _buildCellContent(context, value, isFixed, isError, notes, size),
       ),
     );
   }
 
+  Widget _buildCellContentWithDrop(BuildContext context, int row, int col,
+      int value, bool isFixed, bool isError, Set<int> notes, int size,
+      double cellSize) {
+    final cellKey = row * widget.gameState.gridSize + col;
+    final dropAnim = _dropAnimations[cellKey];
+    final bounceAnim = _dropBounceAnimations[cellKey];
+    final controller = _dropControllers[cellKey];
+
+    if (dropAnim != null && bounceAnim != null && controller != null &&
+        controller.isAnimating) {
+      return AnimatedBuilder(
+        animation: controller,
+        builder: (context, child) {
+          return Transform.translate(
+            offset: Offset(0, dropAnim.value * cellSize),
+            child: Transform.scale(
+              scale: bounceAnim.value.clamp(0.3, 1.2),
+              child: Opacity(
+                opacity: (1.0 + dropAnim.value * 0.5).clamp(0.0, 1.0),
+                child: _buildCellContent(context, value, isFixed, isError, notes, size),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    return _buildCellContent(context, value, isFixed, isError, notes, size);
+  }
+
   Widget _buildCellContent(BuildContext context, int value, bool isFixed,
       bool isError, Set<int> notes, int size) {
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    // Use app theme manager for consistent dark/light mode detection
+    final isDark = AppThemeManager.colors.isDark;
 
-    final fixedColor =
-        isDark ? AppColors.textPrimaryDark : AppColors.textPrimary;
-    final userColor = isDark ? AppColors.primaryLight : AppColors.primary;
-    final errorTextColor = isDark ? AppColors.error : AppColors.error;
+    // High-contrast colors - use very dark/light colors for maximum visibility
+    const fixedColorLight = Color(0xFF000000); // Pure black for light mode
+    const fixedColorDark = Color(0xFFFFFFFF); // Pure white for dark mode
+    const userColorLight = Color(0xFF1565C0); // Strong blue for user input
+    const userColorDark = Color(0xFF90CAF9); // Light blue for dark mode
+    const errorColor = Color(0xFFD32F2F); // Strong red for errors
+
+    final fixedColor = isDark ? fixedColorDark : fixedColorLight;
+    final userColor = isDark ? userColorDark : userColorLight;
 
     if (value != 0) {
       return Center(
@@ -370,10 +465,9 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
               ? String.fromCharCode(65 + value - 10)
               : '$value',
           style: TextStyle(
-            fontSize: size == 9 ? 24 : 16,
-            fontWeight: isFixed ? FontWeight.w800 : FontWeight.w600,
-            color:
-                isError ? errorTextColor : (isFixed ? fixedColor : userColor),
+            fontSize: size == 9 ? 28 : 18,
+            fontWeight: isFixed ? FontWeight.w700 : FontWeight.w600,
+            color: isError ? errorColor : (isFixed ? fixedColor : userColor),
           ),
         ),
       );
@@ -384,10 +478,13 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
   }
 
   Widget _buildNotes(BuildContext context, Set<int> notes, int size) {
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    // Use app theme manager for consistent dark/light mode detection
+    final isDark = AppThemeManager.colors.isDark;
     final noteGridSize = size == 9 ? 3 : 4;
-    final noteColor =
-        isDark ? AppColors.textSecondaryDark : AppColors.textSecondary;
+    // Softer gray note colors - easier on the eyes
+    const noteColorLight = Color(0xFF757575); // Medium gray for light mode
+    const noteColorDark = Color(0xFF9E9E9E); // Softer gray for dark mode
+    final noteColor = isDark ? noteColorDark : noteColorLight;
 
     return Padding(
       padding: const EdgeInsets.all(2),
@@ -403,7 +500,7 @@ class _SudokuGridState extends State<SudokuGrid> with TickerProviderStateMixin {
                         ? String.fromCharCode(65 + num - 10)
                         : '$num',
                     style: TextStyle(
-                      fontSize: size == 9 ? 10 : 7,
+                      fontSize: size == 9 ? 10.5 : 7.5,
                       fontWeight: FontWeight.w500,
                       color: noteColor,
                     ),

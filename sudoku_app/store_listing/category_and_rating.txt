@@ -1,0 +1,61 @@
+============================================================
+GOOGLE PLAY STORE - CATEGORY & RATING INFO
+============================================================
+
+STORE PRESENCE
+--------------
+App name:       SudoQ: Zen Sudoku Puzzle
+Developer:      Melody Yazılım
+Package name:   com.sudoq.puzzle
+
+CATEGORIZATION
+--------------
+App or Game:    Game
+Category:       Puzzle (Board > Puzzle)
+Tags (up to 5): Sudoku, Puzzle, Brain Games, Multiplayer, Daily Challenge
+
+CONTACT DETAILS
+---------------
+Email:          support@melodyyazilim.com.tr
+Website:        https://melodyyazilim.com.tr
+Phone:          (optional - leave empty if you prefer)
+
+CONTENT RATING (IARC QUESTIONNAIRE ANSWERS)
+--------------------------------------------
+When filling out the IARC rating questionnaire in Play Console,
+answer as follows:
+
+Q: Does the app contain violence?
+A: No
+
+Q: Does the app contain sexual content?
+A: No
+
+Q: Does the app contain profanity or crude humor?
+A: No
+
+Q: Does the app allow user-generated content?
+A: No
+
+Q: Does the app contain gambling themes?
+A: No
+
+Q: Does the app contain ads?
+A: Yes (interstitial and banner ads via AdMob)
+
+Q: Does the app allow users to interact or communicate?
+A: No (1v1 duels are gameplay only, no chat)
+
+Q: Does the app allow purchases?
+A: Yes (in-app subscriptions for ad-free premium)
+
+Q: Does the app share user location?
+A: No
+
+Expected Rating: PEGI 3 / Everyone (E)
+
+TARGET AUDIENCE
+---------------
+Target age group: 13+ (not designed for children under 13)
+This is important: Do NOT select "children" as target audience
+if you have ads, to avoid COPPA compliance issues.

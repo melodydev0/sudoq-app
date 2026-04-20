@@ -2,21 +2,45 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'user_sync_service.dart';
+import 'entitlement_service.dart';
+import 'local_duel_stats_service.dart';
+import 'storage_service.dart';
 
 /// Authentication service for Firebase Auth with Google Sign-In
 class AuthService {
-  static final FirebaseAuth _auth = FirebaseAuth.instance;
-  static final GoogleSignIn _googleSignIn = GoogleSignIn();
-  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static FirebaseAuth? _authInstance;
+  static GoogleSignIn? _googleSignInInstance;
+  static FirebaseFirestore? _firestoreInstance;
+
+  static FirebaseAuth get _auth {
+    return _authInstance ??= FirebaseAuth.instance;
+  }
+
+  static GoogleSignIn get _googleSignIn {
+    return _googleSignInInstance ??= GoogleSignIn();
+  }
+
+  static FirebaseFirestore get _firestore {
+    return _firestoreInstance ??= FirebaseFirestore.instance;
+  }
+  static String? _lastSignInError;
+  static String? get lastSignInError => _lastSignInError;
 
   /// Current user
-  static User? get currentUser => _auth.currentUser;
+  static User? get currentUser {
+    try {
+      return _auth.currentUser;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Check if user is signed in
   static bool get isSignedIn => currentUser != null;
@@ -30,25 +54,65 @@ class AuthService {
   // Alias for compatibility
   static String? get userId => oderId;
 
-  /// Display name
+  /// Display name - prioritizes custom nickname over Firebase display name
   static String get displayName {
-    if (currentUser?.displayName != null &&
-        currentUser!.displayName!.isNotEmpty) {
-      return currentUser!.displayName!;
+    // First check for custom nickname set by user
+    final customNickname = StorageService.getNickname();
+    if (customNickname != null && customNickname.isNotEmpty) {
+      return customNickname;
     }
-    if (isAnonymous) {
-      // Generate a random player name for anonymous users
-      final shortId = currentUser?.uid.substring(0, 6).toUpperCase() ?? 'ANON';
-      return 'Player_$shortId';
-    }
+    
+    try {
+      // Then check Firebase display name (from Google sign-in)
+      if (currentUser?.displayName != null &&
+          currentUser!.displayName!.isNotEmpty) {
+        return currentUser!.displayName!;
+      }
+      
+      // Generate a default player name based on UID
+      if (currentUser != null) {
+        final shortId = currentUser!.uid.substring(0, 6).toUpperCase();
+        return 'Player_$shortId';
+      }
+    } catch (_) {}
+    
     return 'Player';
   }
+
+  /// Set custom nickname for the user
+  static Future<void> setNickname(String nickname) async {
+    await StorageService.setNickname(nickname);
+    
+    // If user is signed in (not anonymous), also sync to Firestore
+    if (isSignedIn && !isAnonymous) {
+      try {
+        await _firestore.collection('users').doc(oderId).set({
+          'displayName': nickname,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        
+        // Update leaderboard entry
+        await UserSyncService.updateDisplayName(nickname);
+      } catch (e) {
+        debugPrint('Failed to sync nickname to cloud: $e');
+      }
+    }
+  }
+
+  /// Get current nickname (custom or generated)
+  static String get nickname => displayName;
 
   /// Photo URL
   static String? get photoUrl => currentUser?.photoURL;
 
   /// Auth state changes stream
-  static Stream<User?> get authStateChanges => _auth.authStateChanges();
+  static Stream<User?> get authStateChanges {
+    try {
+      return _auth.authStateChanges();
+    } catch (_) {
+      return const Stream.empty();
+    }
+  }
 
   static Future<UserCredential?>? _anonSignInFuture;
 
@@ -69,29 +133,46 @@ class AuthService {
 
   static Future<UserCredential?> _signInAnonymouslyImpl() async {
     try {
+      // Small yield to let caller continue without blocking.
       await Future.delayed(Duration.zero);
+
       final userCredential = await _auth
           .signInAnonymously()
-          .timeout(const Duration(seconds: 4), onTimeout: () {
-        debugPrint('Anonymous sign-in timed out (Firebase/network?)');
+          .timeout(const Duration(seconds: 6), onTimeout: () {
         throw TimeoutException('Anonymous sign-in timed out');
       });
+
       if (userCredential.user == null) {
         debugPrint('Anonymous sign-in: user is null');
         return null;
       }
+
+      // Create a minimal user profile for anonymous users so admin panel can track them
+      try {
+        final userRef = _firestore.collection('users').doc(userCredential.user!.uid);
+        final docSnap = await userRef.get();
+        if (!docSnap.exists) {
+          await userRef.set({
+            'uid': userCredential.user!.uid,
+            'displayName': '',
+            'email': '',
+            'photoUrl': '',
+            'createdAt': FieldValue.serverTimestamp(),
+            'lastSeenAt': FieldValue.serverTimestamp(),
+            'platform': defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios',
+            'isAnonymous': true,
+          });
+        }
+      } catch (e) {
+        debugPrint('Anonymous profile creation failed (non-fatal): $e');
+      }
+
       debugPrint('Signed in anonymously: ${userCredential.user?.uid}');
       return userCredential;
-    } on FirebaseAuthException catch (e) {
-      debugPrint(
-          'Anonymous sign-in FirebaseAuthException: ${e.code} ${e.message}');
-      return null;
-    } on TimeoutException catch (e) {
-      debugPrint('Anonymous sign-in timeout: $e');
-      return null;
-    } catch (e, st) {
-      debugPrint('Anonymous sign-in error: $e');
-      if (kDebugMode) debugPrint('$st');
+    } catch (e) {
+      // Catch everything – this is called via .ignore() at startup,
+      // so it must never throw.
+      debugPrint('Anonymous sign-in failed: $e');
       return null;
     }
   }
@@ -102,9 +183,11 @@ class AuthService {
   /// local duel progress to Firestore (users/ doc created here).
   static Future<UserCredential?> signInWithGoogle() async {
     try {
+      _lastSignInError = null;
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
-        debugPrint('Google sign-in cancelled by user');
+        _lastSignInError = 'Google sign-in cancelled by user.';
+        debugPrint(_lastSignInError);
         return null;
       }
 
@@ -120,33 +203,84 @@ class AuthService {
 
       if (wasAnonymous && currentUser != null) {
         // Link Google to existing anonymous account – same UID, progress preserved
-        userCredential = await currentUser!.linkWithCredential(credential);
-        debugPrint(
-            'Linked Google to anonymous account: ${userCredential.user?.uid}');
+        try {
+          userCredential = await currentUser!.linkWithCredential(credential);
+          debugPrint(
+              'Linked Google to anonymous account: ${userCredential.user?.uid}');
+        } on FirebaseAuthException catch (linkError) {
+          if (linkError.code == 'credential-already-in-use') {
+            // This Google account already has a separate Firebase account.
+            // Merge local anonymous progress into that account, then sign in.
+            debugPrint(
+                'Google account already in use – merging local data then switching accounts');
+            final mergeResult = await _mergeLocalThenSignIn(credential);
+            if (mergeResult != null) {
+              debugPrint('Signed in after merge: ${mergeResult.user?.displayName}');
+              return mergeResult;
+            }
+            return null;
+          }
+          rethrow;
+        }
       } else {
         // New sign-in (or not signed in)
         userCredential = await _auth.signInWithCredential(credential);
       }
 
-      // Create or update Firestore profile (for anonymous we had no users/ doc)
-      await _createOrUpdateUserProfile(userCredential.user!);
+      // Post-sign-in Firestore sync – non-blocking so sign-in succeeds even
+      // if Firestore rules reject the write (e.g. first-time setup, stale rules).
+      try {
+        await _createOrUpdateUserProfile(userCredential.user!);
+      } catch (e) {
+        debugPrint('Post-sign-in profile sync failed (non-fatal): $e');
+      }
 
-      // If they were anonymous, upload local duel (and other) stats to cloud
-      if (wasAnonymous) {
-        await UserSyncService.syncToCloud();
-      } else {
-        await UserSyncService.syncFromCloud();
+      try {
+        if (wasAnonymous) {
+          await UserSyncService.syncToCloud();
+        } else {
+          final hasPending = await UserSyncService.hasPendingSync();
+          if (hasPending) {
+            await UserSyncService.syncToCloud();
+          } else {
+            await UserSyncService.syncFromCloud();
+          }
+        }
+      } catch (e) {
+        debugPrint('Post-sign-in cloud sync failed (non-fatal): $e');
+      }
+
+      try {
+        await EntitlementService.refreshFromCloud();
+      } catch (e) {
+        debugPrint('Post-sign-in entitlement refresh failed (non-fatal): $e');
       }
 
       debugPrint('Signed in as: ${userCredential.user?.displayName}');
       return userCredential;
+    } on PlatformException catch (e) {
+      final msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
+      if (msg.contains('developer_error') ||
+          msg.contains('unknown calling package name') ||
+          msg.contains('com.google.android.gms')) {
+        _lastSignInError =
+            'Google Sign-In is not configured for this Android app yet. '
+            'Enable Google provider in Firebase Auth and add Android SHA-1/SHA-256, '
+            'then download new google-services.json.';
+      } else {
+        _lastSignInError = 'Google sign-in failed: ${e.message ?? e.code}';
+      }
+      debugPrint('Google sign-in platform error: ${e.code} ${e.message}');
+      return null;
     } on FirebaseAuthException catch (e) {
       if (e.code == 'credential-already-in-use') {
         debugPrint('This Google account is already used by another user.');
       }
+      _lastSignInError = 'Google sign-in error: ${e.message ?? e.code}';
       debugPrint('Google sign-in error: ${e.code} ${e.message}');
       return null;
     } catch (e) {
+      _lastSignInError = 'Google sign-in error: $e';
       debugPrint('Google sign-in error: $e');
       return null;
     }
@@ -182,9 +316,23 @@ class AuthService {
       UserCredential userCredential;
 
       if (wasAnonymous && currentUser != null) {
-        userCredential = await currentUser!.linkWithCredential(oauthCredential);
-        debugPrint(
-            'Linked Apple to anonymous account: ${userCredential.user?.uid}');
+        try {
+          userCredential = await currentUser!.linkWithCredential(oauthCredential);
+          debugPrint(
+              'Linked Apple to anonymous account: ${userCredential.user?.uid}');
+        } on FirebaseAuthException catch (linkError) {
+          if (linkError.code == 'credential-already-in-use') {
+            debugPrint(
+                'Apple account already in use – merging local data then switching accounts');
+            final mergeResult = await _mergeLocalThenSignIn(oauthCredential);
+            if (mergeResult != null) {
+              debugPrint('Signed in after Apple merge: ${mergeResult.user?.displayName}');
+              return mergeResult;
+            }
+            return null;
+          }
+          rethrow;
+        }
       } else {
         userCredential = await _auth.signInWithCredential(oauthCredential);
       }
@@ -194,8 +342,14 @@ class AuthService {
       if (wasAnonymous) {
         await UserSyncService.syncToCloud();
       } else {
-        await UserSyncService.syncFromCloud();
+        final hasPending = await UserSyncService.hasPendingSync();
+        if (hasPending) {
+          await UserSyncService.syncToCloud();
+        } else {
+          await UserSyncService.syncFromCloud();
+        }
       }
+      await EntitlementService.refreshFromCloud();
 
       debugPrint('Signed in with Apple: ${userCredential.user?.uid}');
       return userCredential;
@@ -211,8 +365,49 @@ class AuthService {
     }
   }
 
-  static String _generateNonce([int length = 32]) {
-    final random = Random.secure();
+  /// Called when `linkWithCredential` fails with credential-already-in-use.
+  /// Saves local anonymous progress, signs in to the existing account, then
+  /// merges the anonymous data into that account (keeping the higher values).
+  static Future<UserCredential?> _mergeLocalThenSignIn(AuthCredential credential) async {
+    // 1. Capture all local progress before signing out of anonymous account
+    final localLevel = UserSyncService.exportLocalForMerge();
+    final oldAnonymousUid = currentUser?.uid;
+
+    // 2. Sign in to the existing account that owns this credential
+    final newCredential = await _auth.signInWithCredential(credential);
+    final user = newCredential.user;
+    if (user == null) return null;
+
+    // 3. Create/update profile doc if needed
+    try {
+      await _createOrUpdateUserProfile(user);
+    } catch (e) {
+      debugPrint('Merge profile sync failed (non-fatal): $e');
+    }
+
+    // 4. Merge: pull cloud data, take the best of local vs cloud, write back
+    try {
+      await UserSyncService.mergeLocalIntoCloud(localLevel);
+      await EntitlementService.refreshFromCloud();
+    } catch (e) {
+      debugPrint('Merge cloud sync failed (non-fatal): $e');
+    }
+
+    // 5. Clean up the orphaned anonymous Firestore doc
+    if (oldAnonymousUid != null && oldAnonymousUid != user.uid) {
+      try {
+        await _firestore.collection('users').doc(oldAnonymousUid).delete();
+        debugPrint('Deleted orphaned anonymous doc: $oldAnonymousUid');
+      } catch (e) {
+        debugPrint('Orphan cleanup failed (non-fatal): $e');
+      }
+    }
+
+    debugPrint('Merged anonymous data into existing account: ${user.uid}');
+    return newCredential;
+  }
+
+  static String _generateNonce([int length = 32]) {    final random = Random.secure();
     final bytes = List<int>.generate(length, (_) => random.nextInt(256));
     return base64Url.encode(bytes);
   }
@@ -220,7 +415,7 @@ class AuthService {
   static String _sha256(String input) {
     final bytes = utf8.encode(input);
     final digest = sha256.convert(bytes);
-    return base64Url.encode(digest.bytes);
+    return digest.toString();
   }
 
   /// Create or update user profile in Firestore
@@ -234,7 +429,9 @@ class AuthService {
         'uid': user.uid,
         'displayName': user.displayName ?? 'Player',
         'photoUrl': user.photoURL,
-        'email': user.email,
+        'email': user.email ?? '',
+        'platform': defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios',
+        'isAnonymous': false,
         'createdAt': FieldValue.serverTimestamp(),
         'lastSeenAt': FieldValue.serverTimestamp(),
         'duelStats': {
@@ -256,12 +453,19 @@ class AuthService {
       });
       debugPrint('Created new user profile for ${user.displayName}');
     } else {
-      // Update last seen
-      await userRef.update({
+      // Update last seen + ensure createdAt exists for legacy users
+      final updateData = <String, dynamic>{
         'lastSeenAt': FieldValue.serverTimestamp(),
         'displayName': user.displayName ?? doc.data()?['displayName'],
         'photoUrl': user.photoURL ?? doc.data()?['photoUrl'],
-      });
+        'email': user.email ?? doc.data()?['email'] ?? '',
+        'isAnonymous': false,
+        'platform': defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios',
+      };
+      if (doc.data()?['createdAt'] == null) {
+        updateData['createdAt'] = FieldValue.serverTimestamp();
+      }
+      await userRef.update(updateData);
       debugPrint('Updated user profile for ${user.displayName}');
     }
   }
@@ -277,6 +481,59 @@ class AuthService {
       debugPrint('Error getting user profile: $e');
       return null;
     }
+  }
+
+  /// Get user's account creation date
+  static Future<DateTime?> getCreatedAt() async {
+    if (!isSignedIn) return null;
+    
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      final data = doc.data();
+      if (data != null && data['createdAt'] != null) {
+        final timestamp = data['createdAt'] as Timestamp;
+        return timestamp.toDate();
+      }
+      // Fallback: use Firebase Auth metadata
+      return currentUser?.metadata.creationTime;
+    } catch (e) {
+      debugPrint('Error getting createdAt: $e');
+      return currentUser?.metadata.creationTime;
+    }
+  }
+
+  /// Get user's country code (from local storage or Firebase)
+  static String getCountryCode() {
+    return StorageService.getCountryCode();
+  }
+
+  /// Set user's country code and sync to Firebase
+  static Future<void> setCountryCode(String code) async {
+    await StorageService.setCountryCode(code);
+    
+    // Sync to Firebase if user is signed in
+    if (isSignedIn && !isAnonymous) {
+      try {
+        await _firestore.collection('users').doc(userId).set({
+          'countryCode': code,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        
+        // Update leaderboard entries
+        await UserSyncService.updateCountryCode(code);
+      } catch (e) {
+        debugPrint('Failed to sync country code to cloud: $e');
+      }
+    }
+  }
+
+  /// Get country flag emoji from country code
+  static String getCountryFlag() {
+    final code = getCountryCode().toUpperCase();
+    if (code.length != 2) return '🌍';
+    final firstLetter = code.codeUnitAt(0) - 0x41 + 0x1F1E6;
+    final secondLetter = code.codeUnitAt(1) - 0x41 + 0x1F1E6;
+    return String.fromCharCodes([firstLetter, secondLetter]);
   }
 
   /// Get user duel stats
@@ -366,6 +623,13 @@ class AuthService {
     } catch (e) {
       debugPrint('Error updating duel leaderboard: $e');
     }
+  }
+
+  /// Force-sync the duel leaderboard after debug stats update.
+  static Future<void> syncDuelLeaderboard(int elo) async {
+    if (!isSignedIn || isAnonymous) return;
+    final division = _getRankFromElo(elo)['rank'] as String;
+    await _updateDuelLeaderboard(elo, division);
   }
 
   /// Sync local stats to cloud (full replace)
@@ -487,7 +751,13 @@ class AuthService {
 
       await _googleSignIn.signOut();
       await _auth.signOut();
-      debugPrint('Signed out');
+
+      // Clear local caches so the next sign-in doesn't inherit stale data
+      await LocalDuelStatsService.resetAll();
+      await StorageService.clearAll();
+      await StorageService.init();
+
+      debugPrint('Signed out and local data cleared');
     } catch (e) {
       debugPrint('Sign out error: $e');
     }
@@ -498,16 +768,58 @@ class AuthService {
     if (!isSignedIn) return false;
 
     try {
-      // Delete user data from Firestore
-      await _firestore.collection('users').doc(userId).delete();
+      final uid = userId;
+      if (uid == null) return false;
+
+      // Delete all user-related Firestore collections
+      final batch = _firestore.batch();
+      batch.delete(_firestore.collection('users').doc(uid));
+      batch.delete(_firestore.collection('leaderboard').doc(uid));
+      batch.delete(_firestore.collection('duel_leaderboard').doc(uid));
+      batch.delete(_firestore.collection('entitlements').doc(uid));
+      await batch.commit();
+
+      // Delete subcollections (best effort)
+      try {
+        final duelHistory = await _firestore
+            .collection('users')
+            .doc(uid)
+            .collection('duel_history')
+            .limit(500)
+            .get();
+        for (final doc in duelHistory.docs) {
+          await doc.reference.delete();
+        }
+        final achievements = await _firestore
+            .collection('users')
+            .doc(uid)
+            .collection('achievements')
+            .limit(500)
+            .get();
+        for (final doc in achievements.docs) {
+          await doc.reference.delete();
+        }
+      } catch (_) {}
 
       // Delete Firebase Auth account
-      await currentUser?.delete();
+      bool authDeleted = false;
+      try {
+        await currentUser?.delete();
+        authDeleted = true;
+      } catch (e) {
+        debugPrint('Firebase Auth delete failed (may need re-auth): $e');
+      }
 
       // Sign out from Google
       await _googleSignIn.signOut();
+      if (!authDeleted) {
+        await _auth.signOut();
+      }
 
-      debugPrint('Account deleted');
+      // Mirror signOut cleanup: clear local caches
+      await LocalDuelStatsService.resetAll();
+
+      debugPrint('Account deleted (auth removed: $authDeleted)');
       return true;
     } catch (e) {
       debugPrint('Delete account error: $e');

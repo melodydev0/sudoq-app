@@ -35,8 +35,8 @@ class ResponsiveUtils {
     safeBlockHorizontal = (screenWidth - _safeAreaHorizontal) / 100;
     safeBlockVertical = (screenHeight - _safeAreaVertical) / 100;
 
-    // Text scale factor (clamped for accessibility)
-    textScaleFactor = _mediaQueryData.textScaler.scale(1.0).clamp(0.8, 1.4);
+    // Text scale factor — respect user accessibility settings without clamping
+    textScaleFactor = _mediaQueryData.textScaler.scale(1.0);
 
     // Screen size categories
     isSmallScreen = screenWidth < 360;

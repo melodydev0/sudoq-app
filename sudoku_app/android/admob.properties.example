@@ -1,0 +1,14 @@
+# AdMob Configuration for Release Builds
+# ========================================
+# 1. Go to https://admob.google.com
+# 2. Create your app (Android: com.sudoq.puzzle)
+# 3. Create ad units: Banner, Interstitial, Rewarded
+# 4. Copy this file to admob.properties and fill in your real IDs
+# 5. Also set admob.app.id in android/local.properties
+#
+# NEVER commit admob.properties to git!
+
+ADMOB_APP_ID=ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX
+ADMOB_BANNER_AD_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX
+ADMOB_INTERSTITIAL_AD_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX
+ADMOB_REWARDED_AD_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX
