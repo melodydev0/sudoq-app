@@ -1,0 +1,12 @@
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.forward","value":0.0},"timestamp":1770991046634,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:build","message":"splash_build","data":{"screenWidth":800.0,"screenHeight":600.0,"fontSize42Sp":55.0,"fadeValue":0.0,"scaleValue":0.8},"timestamp":1770991046643,"hypothesisId":"H2"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.completed","value":1.0},"timestamp":1770991046956,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.forward","value":0.0},"timestamp":1770991047268,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:build","message":"splash_build","data":{"screenWidth":800.0,"screenHeight":600.0,"fontSize42Sp":55.0,"fadeValue":0.0,"scaleValue":0.8},"timestamp":1770991047270,"hypothesisId":"H2"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.completed","value":1.0},"timestamp":1770991047305,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.forward","value":0.0},"timestamp":1770991074220,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:build","message":"splash_build","data":{"screenWidth":800.0,"screenHeight":600.0,"fontSize42Sp":55.0,"fadeValue":0.0,"scaleValue":0.8},"timestamp":1770991074229,"hypothesisId":"H2"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.completed","value":1.0},"timestamp":1770991074532,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.forward","value":0.0},"timestamp":1770991074851,"hypothesisId":"H1"}
+{"location":"splash_screen.dart:build","message":"splash_build","data":{"screenWidth":800.0,"screenHeight":600.0,"fontSize42Sp":55.0,"fadeValue":0.0,"scaleValue":0.8},"timestamp":1770991074852,"hypothesisId":"H2"}
+{"location":"splash_screen.dart:initAnimations","message":"animation_status","data":{"status":"AnimationStatus.completed","value":1.0},"timestamp":1770991074886,"hypothesisId":"H1"}

@@ -1,0 +1,13 @@
+=== GEMINI'YE GÖNDERECEĞİN MESAJ ===
+
+1) Aşağıdaki talimatı oku ve Flutter sudoku uygulamasındaki TÜM animasyonları premium seviyeye getir. Cursor senin çıktılarını projeye uygulayacak; gerekirse sana destek olacak veya sen tarif edip o yazacak.
+
+2) Buraya "GEMINI_ANIMATION_UPGRADE_PROMPT.md" dosyasının TAM içeriğini yapıştır (Cursor'da dosyayı aç, hepsini kopyala, Gemini'ye yapıştır).
+
+3) Şunu ekle:
+
+Lütfen 7 dosyanın hepsini sırayla ele al. İlk cevabında en az BİR dosya için tam, kopyala-yapıştır çalışan Dart kodu ver (tercihen celebration_effect.dart veya sudoku_grid.dart satır/sütun/kutu tamamlama). Sonra diğerlerini de ver. Hedef: Duolingo / Clash Royale tarzı "vay" hissi; basit bırakma.
+
+=== GEMINI CEVABINDAN SONRA CURSOR'A YAZ ===
+
+"Gemini animasyon güncellemelerini verdi. docs/GEMINI_ANIMATION_UPGRADE_PROMPT.md'deki talimata göre dosyaları güncelle, entegre et, flutter analyze çalıştır. Eksik veya hata varsa düzelt; premium his eksik kalan yerleri de aynı dokümana göre cilala."

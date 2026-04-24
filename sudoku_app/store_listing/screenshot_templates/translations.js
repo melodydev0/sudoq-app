@@ -1,0 +1,255 @@
+const translations = {
+
+  // ═══════════════════════════════════════════
+  // ENGLISH (en-US)
+  // ═══════════════════════════════════════════
+  'en-US': {
+    s1_tagline: 'Your Sudoku Journey Starts Here',
+    s1_subtitle: '4 Difficulty Levels \u2022 Daily Challenges \u2022 Quick Start',
+
+    s2_tagline: 'Classic Sudoku, Beautifully Crafted',
+    s2_subtitle: 'Smart Tools: Undo \u2022 Notes \u2022 Hints \u2022 Fast Notes',
+
+    s3_tagline: 'Real-Time 1v1 Duels',
+    s3_subtitle: 'Climb from Bronze to Champion with ELO Ranking',
+
+    s4_tagline: 'A New Puzzle Every Day',
+    s4_subtitle: 'Monthly Calendar \u2022 Exclusive Trophies',
+
+    s5_tagline: 'Track Progress, Level Up',
+    s5_subtitle: 'XP \u2022 Seasons \u2022 Achievements \u2022 Stats',
+
+    s6_tagline: 'Collect Unique Monthly Badges',
+    s6_subtitle: '12 Beautifully Designed Badges to Earn',
+  },
+
+  // ═══════════════════════════════════════════
+  // TURKISH (tr-TR)
+  // ═══════════════════════════════════════════
+  'tr-TR': {
+    s1_tagline: 'Sudoku Yolculu\u011Fun Burada Ba\u015Fl\u0131yor',
+    s1_subtitle: '4 Zorluk Seviyesi \u2022 G\u00FCnl\u00FCk Meydan Okuma \u2022 H\u0131zl\u0131 Ba\u015Flang\u0131\u00E7',
+
+    s2_tagline: 'Klasik Sudoku, Zarif Tasar\u0131m',
+    s2_subtitle: 'Ak\u0131ll\u0131 Ara\u00E7lar: Geri Al \u2022 Notlar \u2022 \u0130pu\u00E7lar\u0131 \u2022 H\u0131zl\u0131 Not',
+
+    s3_tagline: 'Canl\u0131 1\u20191e 1 D\u00FCello',
+    s3_subtitle: 'ELO S\u0131ralamas\u0131yla Bronzdan \u015Eampiyona Y\u00FCksel',
+
+    s4_tagline: 'Her G\u00FCn Yeni Bir Bulmaca',
+    s4_subtitle: 'Ayl\u0131k Takvim \u2022 \u00D6zel \u00D6d\u00FCller',
+
+    s5_tagline: '\u0130lerlemeni Takip Et, Seviye Atla',
+    s5_subtitle: 'XP \u2022 Sezonlar \u2022 Ba\u015Far\u0131mlar \u2022 \u0130statistikler',
+
+    s6_tagline: 'E\u015Fsiz Ayl\u0131k Rozetleri Topla',
+    s6_subtitle: 'Kazanmak \u0130\u00E7in 12 \u00D6zel Tasar\u0131m Rozet',
+  },
+
+  // ═══════════════════════════════════════════
+  // CHINESE SIMPLIFIED (zh-CN)
+  // ═══════════════════════════════════════════
+  'zh-CN': {
+    s1_tagline: '\u4F60\u7684\u6570\u72EC\u4E4B\u65C5\u4ECE\u8FD9\u91CC\u5F00\u59CB',
+    s1_subtitle: '4\u79CD\u96BE\u5EA6 \u2022 \u6BCF\u65E5\u6311\u6218 \u2022 \u5FEB\u901F\u5F00\u59CB',
+
+    s2_tagline: '\u7ECF\u5178\u6570\u72EC\uFF0C\u7CBE\u7F8E\u8BBE\u8BA1',
+    s2_subtitle: '\u667A\u80FD\u5DE5\u5177\uFF1A\u64A4\u9500 \u2022 \u7B14\u8BB0 \u2022 \u63D0\u793A \u2022 \u5FEB\u901F\u7B14\u8BB0',
+
+    s3_tagline: '\u5B9E\u65F6 1v1 \u5BF9\u6218',
+    s3_subtitle: '\u4ECE\u9752\u94DC\u5230\u51A0\u519B\uFF0C\u7528ELO\u6392\u540D\u653B\u514B\u6BCF\u4E2A\u6BB5\u4F4D',
+
+    s4_tagline: '\u6BCF\u5929\u4E00\u9053\u65B0\u8C1C\u9898',
+    s4_subtitle: '\u6708\u5386\u6311\u6218 \u2022 \u4E13\u5C5E\u5956\u676F',
+
+    s5_tagline: '\u8FFD\u8E2A\u8FDB\u5EA6\uFF0C\u4E0D\u65AD\u5347\u7EA7',
+    s5_subtitle: '\u7ECF\u9A8C\u503C \u2022 \u8D5B\u5B63 \u2022 \u6210\u5C31 \u2022 \u7EDF\u8BA1',
+
+    s6_tagline: '\u6536\u96C6\u6BCF\u6708\u4E13\u5C5E\u5FBD\u7AE0',
+    s6_subtitle: '12\u679A\u7CBE\u7F8E\u8BBE\u8BA1\u5FBD\u7AE0\u7B49\u4F60\u89E3\u9501',
+  },
+
+  // ═══════════════════════════════════════════
+  // HINDI (hi-IN)
+  // ═══════════════════════════════════════════
+  'hi-IN': {
+    s1_tagline: '\u0906\u092A\u0915\u0940 \u0938\u0941\u0921\u094B\u0915\u0942 \u092F\u093E\u0924\u094D\u0930\u093E \u092F\u0939\u093E\u0901 \u0938\u0947 \u0936\u0941\u0930\u0942',
+    s1_subtitle: '4 \u0915\u0920\u093F\u0928\u093E\u0908 \u0938\u094D\u0924\u0930 \u2022 \u0926\u0948\u0928\u093F\u0915 \u091A\u0941\u0928\u094C\u0924\u0940 \u2022 \u0924\u094D\u0935\u0930\u093F\u0924 \u0936\u0941\u0930\u0942\u0906\u0924',
+
+    s2_tagline: '\u0915\u094D\u0932\u093E\u0938\u093F\u0915 \u0938\u0941\u0921\u094B\u0915\u0942, \u0938\u0941\u0902\u0926\u0930 \u0921\u093F\u091C\u093C\u093E\u0907\u0928',
+    s2_subtitle: '\u0938\u094D\u092E\u093E\u0930\u094D\u091F \u091F\u0942\u0932\u094D\u0938: \u0905\u0928\u094D\u0921\u0942 \u2022 \u0928\u094B\u091F\u094D\u0938 \u2022 \u0939\u093F\u0902\u091F\u094D\u0938 \u2022 \u092B\u093E\u0938\u094D\u091F \u0928\u094B\u091F\u094D\u0938',
+
+    s3_tagline: '\u0930\u093F\u092F\u0932-\u091F\u093E\u0907\u092E 1v1 \u0926\u094D\u0935\u0902\u0926\u094D\u0935',
+    s3_subtitle: 'ELO \u0930\u0948\u0902\u0915\u093F\u0902\u0917 \u0938\u0947 \u092C\u094D\u0930\u0949\u0928\u094D\u091C\u093C \u0938\u0947 \u091A\u0948\u0902\u092A\u093F\u092F\u0928 \u0924\u0915 \u092A\u0939\u0941\u0901\u091A\u0947\u0902',
+
+    s4_tagline: '\u0939\u0930 \u0926\u093F\u0928 \u090F\u0915 \u0928\u0908 \u092A\u0939\u0947\u0932\u0940',
+    s4_subtitle: '\u092E\u093E\u0938\u093F\u0915 \u0915\u0948\u0932\u0947\u0902\u0921\u0930 \u2022 \u0935\u093F\u0936\u0947\u0937 \u091F\u094D\u0930\u0949\u092B\u093F\u092F\u093E\u0901',
+
+    s5_tagline: '\u092A\u094D\u0930\u0917\u0924\u093F \u091F\u094D\u0930\u0948\u0915 \u0915\u0930\u0947\u0902, \u0932\u0947\u0935\u0932 \u0905\u092A',
+    s5_subtitle: 'XP \u2022 \u0938\u0940\u091C\u093C\u0928 \u2022 \u0909\u092A\u0932\u092C\u094D\u0927\u093F\u092F\u093E\u0901 \u2022 \u0906\u0901\u0915\u0921\u093C\u0947',
+
+    s6_tagline: '\u0905\u0928\u094B\u0916\u0947 \u092E\u093E\u0938\u093F\u0915 \u092C\u0948\u091C \u0907\u0915\u091F\u094D\u0920\u093E \u0915\u0930\u0947\u0902',
+    s6_subtitle: '\u0915\u092E\u093E\u0928\u0947 \u0915\u0947 \u0932\u093F\u090F 12 \u0938\u0941\u0902\u0926\u0930 \u0921\u093F\u091C\u093C\u093E\u0907\u0928 \u092C\u0948\u091C',
+  },
+
+  // ═══════════════════════════════════════════
+  // SPANISH (es-ES)
+  // ═══════════════════════════════════════════
+  'es-ES': {
+    s1_tagline: 'Tu Aventura Sudoku Empieza Aqu\u00ED',
+    s1_subtitle: '4 Niveles \u2022 Retos Diarios \u2022 Inicio R\u00E1pido',
+
+    s2_tagline: 'Sudoku Cl\u00E1sico, Dise\u00F1o Elegante',
+    s2_subtitle: 'Herramientas: Deshacer \u2022 Notas \u2022 Pistas \u2022 Notas R\u00E1pidas',
+
+    s3_tagline: 'Duelos 1v1 en Tiempo Real',
+    s3_subtitle: 'Sube de Bronce a Campe\u00F3n con Ranking ELO',
+
+    s4_tagline: 'Un Puzzle Nuevo Cada D\u00EDa',
+    s4_subtitle: 'Calendario Mensual \u2022 Trofeos Exclusivos',
+
+    s5_tagline: 'Sigue tu Progreso, Sube de Nivel',
+    s5_subtitle: 'XP \u2022 Temporadas \u2022 Logros \u2022 Estad\u00EDsticas',
+
+    s6_tagline: 'Colecciona Insignias Mensuales',
+    s6_subtitle: '12 Insignias con Dise\u00F1o \u00DAnico para Ganar',
+  },
+
+  // ═══════════════════════════════════════════
+  // FRENCH (fr-FR)
+  // ═══════════════════════════════════════════
+  'fr-FR': {
+    s1_tagline: 'Votre Aventure Sudoku Commence Ici',
+    s1_subtitle: '4 Niveaux \u2022 D\u00E9fis Quotidiens \u2022 D\u00E9marrage Rapide',
+
+    s2_tagline: 'Sudoku Classique au Design \u00C9l\u00E9gant',
+    s2_subtitle: 'Outils: Annuler \u2022 Notes \u2022 Indices \u2022 Notes Rapides',
+
+    s3_tagline: 'Duels 1v1 en Temps R\u00E9el',
+    s3_subtitle: 'Grimpez de Bronze \u00E0 Champion avec le Classement ELO',
+
+    s4_tagline: 'Un Nouveau Puzzle Chaque Jour',
+    s4_subtitle: 'Calendrier Mensuel \u2022 Troph\u00E9es Exclusifs',
+
+    s5_tagline: 'Suivez vos Progr\u00E8s, Montez en Niveau',
+    s5_subtitle: 'XP \u2022 Saisons \u2022 Succ\u00E8s \u2022 Statistiques',
+
+    s6_tagline: 'Collectionnez les Badges Mensuels',
+    s6_subtitle: '12 Badges au Design Unique \u00E0 D\u00E9bloquer',
+  },
+
+  // ═══════════════════════════════════════════
+  // ARABIC (ar)
+  // ═══════════════════════════════════════════
+  'ar': {
+    s1_tagline: '\u0631\u062D\u0644\u0629 \u0627\u0644\u0633\u0648\u062F\u0648\u0643\u0648 \u062A\u0628\u062F\u0623 \u0645\u0646 \u0647\u0646\u0627',
+    s1_subtitle: '4 \u0645\u0633\u062A\u0648\u064A\u0627\u062A \u2022 \u062A\u062D\u062F\u064A\u0627\u062A \u064A\u0648\u0645\u064A\u0629 \u2022 \u0628\u062F\u0627\u064A\u0629 \u0633\u0631\u064A\u0639\u0629',
+
+    s2_tagline: '\u0633\u0648\u062F\u0648\u0643\u0648 \u0643\u0644\u0627\u0633\u064A\u0643\u064A \u0628\u062A\u0635\u0645\u064A\u0645 \u0623\u0646\u064A\u0642',
+    s2_subtitle: '\u0623\u062F\u0648\u0627\u062A: \u062A\u0631\u0627\u062C\u0639 \u2022 \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u2022 \u062A\u0644\u0645\u064A\u062D\u0627\u062A \u2022 \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0633\u0631\u064A\u0639\u0629',
+
+    s3_tagline: '\u0645\u0628\u0627\u0631\u0632\u0627\u062A 1\u06451 \u0641\u064A \u0627\u0644\u0648\u0642\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A',
+    s3_subtitle: '\u062A\u0633\u0644\u0651\u0642 \u0645\u0646 \u0627\u0644\u0628\u0631\u0648\u0646\u0632 \u0625\u0644\u0649 \u0627\u0644\u0628\u0637\u0644 \u0639\u0628\u0631 \u062A\u0635\u0646\u064A\u0641 ELO',
+
+    s4_tagline: '\u0644\u063A\u0632 \u062C\u062F\u064A\u062F \u0643\u0644 \u064A\u0648\u0645',
+    s4_subtitle: '\u062A\u0642\u0648\u064A\u0645 \u0634\u0647\u0631\u064A \u2022 \u0643\u0624\u0648\u0633 \u062D\u0635\u0631\u064A\u0629',
+
+    s5_tagline: '\u062A\u0627\u0628\u0639 \u062A\u0642\u062F\u0651\u0645\u0643 \u0648\u0627\u0631\u062A\u0642\u0650',
+    s5_subtitle: 'XP \u2022 \u0645\u0648\u0627\u0633\u0645 \u2022 \u0625\u0646\u062C\u0627\u0632\u0627\u062A \u2022 \u0625\u062D\u0635\u0627\u0626\u064A\u0627\u062A',
+
+    s6_tagline: '\u0627\u062C\u0645\u0639 \u0634\u0627\u0631\u0627\u062A \u0634\u0647\u0631\u064A\u0629 \u0641\u0631\u064A\u062F\u0629',
+    s6_subtitle: '12 \u0634\u0627\u0631\u0629 \u0628\u062A\u0635\u0645\u064A\u0645 \u0645\u0645\u064A\u0651\u0632 \u0628\u0627\u0646\u062A\u0638\u0627\u0631\u0643',
+  },
+
+  // ═══════════════════════════════════════════
+  // BENGALI (bn-BD)
+  // ═══════════════════════════════════════════
+  'bn-BD': {
+    s1_tagline: '\u0986\u09AA\u09A8\u09BE\u09B0 \u09B8\u09C1\u09A1\u09CB\u0995\u09C1 \u09AF\u09BE\u09A4\u09CD\u09B0\u09BE \u098F\u0996\u09BE\u09A8\u09C7 \u09B6\u09C1\u09B0\u09C1',
+    s1_subtitle: '4\u099F\u09BF \u0995\u09A0\u09BF\u09A8\u09A4\u09BE\u09B0 \u09B8\u09CD\u09A4\u09B0 \u2022 \u09A6\u09C8\u09A8\u09BF\u0995 \u099A\u09CD\u09AF\u09BE\u09B2\u09C7\u099E\u09CD\u099C \u2022 \u09A6\u09CD\u09B0\u09C1\u09A4 \u09B6\u09C1\u09B0\u09C1',
+
+    s2_tagline: '\u0995\u09CD\u09B2\u09BE\u09B8\u09BF\u0995 \u09B8\u09C1\u09A1\u09CB\u0995\u09C1, \u09B8\u09C1\u09A8\u09CD\u09A6\u09B0 \u09A1\u09BF\u099C\u09BE\u0987\u09A8',
+    s2_subtitle: '\u09B8\u09CD\u09AE\u09BE\u09B0\u09CD\u099F \u099F\u09C1\u09B2\u09B8: \u0986\u09A8\u09A1\u09C1 \u2022 \u09A8\u09CB\u099F\u09B8 \u2022 \u09B9\u09BF\u09A8\u09CD\u099F\u09B8 \u2022 \u09AB\u09BE\u09B8\u09CD\u099F \u09A8\u09CB\u099F\u09B8',
+
+    s3_tagline: '\u09B0\u09BF\u09AF\u09BC\u09C7\u09B2-\u099F\u09BE\u0987\u09AE 1v1 \u09A6\u09CD\u09AC\u09A8\u09CD\u09A6\u09CD\u09AC',
+    s3_subtitle: 'ELO \u09B0\u200D\u09CD\u09AF\u09BE\u0999\u09CD\u0995\u09BF\u0982\u09AF\u09BC\u09C7 \u09AC\u09CD\u09B0\u09CB\u099E\u09CD\u099C \u09A5\u09C7\u0995\u09C7 \u099A\u09CD\u09AF\u09BE\u09AE\u09CD\u09AA\u09BF\u09AF\u09BC\u09A8',
+
+    s4_tagline: '\u09AA\u09CD\u09B0\u09A4\u09BF\u09A6\u09BF\u09A8 \u098F\u0995\u099F\u09BF \u09A8\u09A4\u09C1\u09A8 \u09AA\u09BE\u099C\u09B2',
+    s4_subtitle: '\u09AE\u09BE\u09B8\u09BF\u0995 \u0995\u09CD\u09AF\u09BE\u09B2\u09C7\u09A8\u09CD\u09A1\u09BE\u09B0 \u2022 \u098F\u0995\u09CD\u09B8\u0995\u09CD\u09B2\u09C1\u09B8\u09BF\u09AD \u099F\u09CD\u09B0\u09AB\u09BF',
+
+    s5_tagline: '\u09AA\u09CD\u09B0\u0997\u09A4\u09BF \u099F\u09CD\u09B0\u09CD\u09AF\u09BE\u0995 \u0995\u09B0\u09C1\u09A8, \u09B2\u09C7\u09AD\u09C7\u09B2 \u0986\u09AA',
+    s5_subtitle: 'XP \u2022 \u09B8\u09BF\u099C\u09A8 \u2022 \u0985\u09B0\u09CD\u099C\u09A8 \u2022 \u09AA\u09B0\u09BF\u09B8\u0982\u0996\u09CD\u09AF\u09BE\u09A8',
+
+    s6_tagline: '\u0985\u09A8\u09A8\u09CD\u09AF \u09AE\u09BE\u09B8\u09BF\u0995 \u09AC\u09CD\u09AF\u09BE\u099C \u09B8\u0982\u0997\u09CD\u09B0\u09B9 \u0995\u09B0\u09C1\u09A8',
+    s6_subtitle: '\u0989\u09AA\u09BE\u09B0\u09CD\u099C\u09A8\u09C7\u09B0 \u099C\u09A8\u09CD\u09AF 12\u099F\u09BF \u09B8\u09C1\u09A8\u09CD\u09A6\u09B0 \u09A1\u09BF\u099C\u09BE\u0987\u09A8 \u09AC\u09CD\u09AF\u09BE\u099C',
+  },
+
+  // ═══════════════════════════════════════════
+  // PORTUGUESE (pt-BR)
+  // ═══════════════════════════════════════════
+  'pt-BR': {
+    s1_tagline: 'Sua Jornada Sudoku Come\u00E7a Aqui',
+    s1_subtitle: '4 N\u00EDveis \u2022 Desafios Di\u00E1rios \u2022 In\u00EDcio R\u00E1pido',
+
+    s2_tagline: 'Sudoku Cl\u00E1ssico, Design Elegante',
+    s2_subtitle: 'Ferramentas: Desfazer \u2022 Notas \u2022 Dicas \u2022 Notas R\u00E1pidas',
+
+    s3_tagline: 'Duelos 1v1 em Tempo Real',
+    s3_subtitle: 'Suba de Bronze a Campe\u00E3o com Ranking ELO',
+
+    s4_tagline: 'Um Novo Puzzle Todos os Dias',
+    s4_subtitle: 'Calend\u00E1rio Mensal \u2022 Trof\u00E9us Exclusivos',
+
+    s5_tagline: 'Acompanhe seu Progresso, Suba de N\u00EDvel',
+    s5_subtitle: 'XP \u2022 Temporadas \u2022 Conquistas \u2022 Estat\u00EDsticas',
+
+    s6_tagline: 'Colecione Insign\u00EDas Mensais \u00DAnicas',
+    s6_subtitle: '12 Insign\u00EDas com Design Exclusivo para Conquistar',
+  },
+
+  // ═══════════════════════════════════════════
+  // RUSSIAN (ru-RU)
+  // ═══════════════════════════════════════════
+  'ru-RU': {
+    s1_tagline: '\u0412\u0430\u0448\u0435 \u041F\u0443\u0442\u0435\u0448\u0435\u0441\u0442\u0432\u0438\u0435 \u0421\u0443\u0434\u043E\u043A\u0443 \u041D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F',
+    s1_subtitle: '4 \u0423\u0440\u043E\u0432\u043D\u044F \u2022 \u0415\u0436\u0435\u0434\u043D\u0435\u0432\u043D\u044B\u0435 \u0417\u0430\u0434\u0430\u0447\u0438 \u2022 \u0411\u044B\u0441\u0442\u0440\u044B\u0439 \u0421\u0442\u0430\u0440\u0442',
+
+    s2_tagline: '\u041A\u043B\u0430\u0441\u0441\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u0421\u0443\u0434\u043E\u043A\u0443, \u0418\u0437\u044F\u0449\u043D\u044B\u0439 \u0414\u0438\u0437\u0430\u0439\u043D',
+    s2_subtitle: '\u0418\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u044B: \u041E\u0442\u043C\u0435\u043D\u0430 \u2022 \u0417\u0430\u043C\u0435\u0442\u043A\u0438 \u2022 \u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u2022 \u0411\u044B\u0441\u0442\u0440\u044B\u0435 \u0417\u0430\u043C\u0435\u0442\u043A\u0438',
+
+    s3_tagline: '\u0414\u0443\u044D\u043B\u0438 1\u04451 \u0432 \u0420\u0435\u0430\u043B\u044C\u043D\u043E\u043C \u0412\u0440\u0435\u043C\u0435\u043D\u0438',
+    s3_subtitle: '\u041F\u043E\u0434\u043D\u0438\u043C\u0438\u0442\u0435\u0441\u044C \u043E\u0442 \u0411\u0440\u043E\u043D\u0437\u044B \u0434\u043E \u0427\u0435\u043C\u043F\u0438\u043E\u043D\u0430 \u0441 \u0440\u0435\u0439\u0442\u0438\u043D\u0433\u043E\u043C ELO',
+
+    s4_tagline: '\u041D\u043E\u0432\u0430\u044F \u0413\u043E\u043B\u043E\u0432\u043E\u043B\u043E\u043C\u043A\u0430 \u041A\u0430\u0436\u0434\u044B\u0439 \u0414\u0435\u043D\u044C',
+    s4_subtitle: '\u041C\u0435\u0441\u044F\u0447\u043D\u044B\u0439 \u041A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C \u2022 \u042D\u043A\u0441\u043A\u043B\u044E\u0437\u0438\u0432\u043D\u044B\u0435 \u0422\u0440\u043E\u0444\u0435\u0438',
+
+    s5_tagline: '\u041E\u0442\u0441\u043B\u0435\u0436\u0438\u0432\u0430\u0439\u0442\u0435 \u041F\u0440\u043E\u0433\u0440\u0435\u0441\u0441, \u0420\u0430\u0441\u0442\u0438\u0442\u0435',
+    s5_subtitle: 'XP \u2022 \u0421\u0435\u0437\u043E\u043D\u044B \u2022 \u0414\u043E\u0441\u0442\u0438\u0436\u0435\u043D\u0438\u044F \u2022 \u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430',
+
+    s6_tagline: '\u0421\u043E\u0431\u0438\u0440\u0430\u0439\u0442\u0435 \u0423\u043D\u0438\u043A\u0430\u043B\u044C\u043D\u044B\u0435 \u0417\u043D\u0430\u0447\u043A\u0438',
+    s6_subtitle: '12 \u041A\u0440\u0430\u0441\u0438\u0432\u044B\u0445 \u0417\u043D\u0430\u0447\u043A\u043E\u0432 \u0416\u0434\u0443\u0442 \u0412\u0430\u0441',
+  },
+
+  // ═══════════════════════════════════════════
+  // JAPANESE (ja-JP)
+  // ═══════════════════════════════════════════
+  'ja-JP': {
+    s1_tagline: '\u6570\u72EC\u306E\u65C5\u304C\u3053\u3053\u304B\u3089\u59CB\u307E\u308B',
+    s1_subtitle: '4\u3064\u306E\u96E3\u6613\u5EA6 \u2022 \u30C7\u30A4\u30EA\u30FC\u30C1\u30E3\u30EC\u30F3\u30B8 \u2022 \u30AF\u30A4\u30C3\u30AF\u30B9\u30BF\u30FC\u30C8',
+
+    s2_tagline: '\u7F8E\u3057\u304F\u4F5C\u3089\u308C\u305F\u30AF\u30E9\u30B7\u30C3\u30AF\u6570\u72EC',
+    s2_subtitle: '\u30B9\u30DE\u30FC\u30C8\u30C4\u30FC\u30EB: \u5143\u306B\u623B\u3059 \u2022 \u30E1\u30E2 \u2022 \u30D2\u30F3\u30C8 \u2022 \u30AF\u30A4\u30C3\u30AF\u30E1\u30E2',
+
+    s3_tagline: '\u30EA\u30A2\u30EB\u30BF\u30A4\u30E0 1v1 \u30C7\u30E5\u30A8\u30EB',
+    s3_subtitle: 'ELO\u30E9\u30F3\u30AD\u30F3\u30B0\u3067\u30D6\u30ED\u30F3\u30BA\u304B\u3089\u30C1\u30E3\u30F3\u30D4\u30AA\u30F3\u3078',
+
+    s4_tagline: '\u6BCE\u65E5\u65B0\u3057\u3044\u30D1\u30BA\u30EB',
+    s4_subtitle: '\u6708\u9593\u30AB\u30EC\u30F3\u30C0\u30FC \u2022 \u9650\u5B9A\u30C8\u30ED\u30D5\u30A3\u30FC',
+
+    s5_tagline: '\u9032\u6357\u3092\u8FFD\u8DE1\u3001\u30EC\u30D9\u30EB\u30A2\u30C3\u30D7',
+    s5_subtitle: 'XP \u2022 \u30B7\u30FC\u30BA\u30F3 \u2022 \u5B9F\u7E3E \u2022 \u7D71\u8A08',
+
+    s6_tagline: '\u6BCE\u6708\u306E\u30E6\u30CB\u30FC\u30AF\u30D0\u30C3\u30B8\u3092\u96C6\u3081\u3088\u3046',
+    s6_subtitle: '\u7372\u5F97\u3067\u304D\u308B12\u500B\u306E\u7F8E\u3057\u3044\u30D0\u30C3\u30B8',
+  },
+};

@@ -1,0 +1,99 @@
+name: sudoku_app
+description: SudoQ - Zen Sudoku Puzzle. A relaxing brain training game with beautiful design.
+publish_to: 'none'
+version: 1.0.4+25
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
+  
+  # State Management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+
+  # Navigation
+  go_router: ^14.3.0
+  
+  # Storage
+  shared_preferences: ^2.2.2
+  
+  # Ads
+  google_mobile_ads: ^5.0.0
+  
+  # In-App Purchase
+  in_app_purchase: ^3.1.11
+  in_app_purchase_android: ^0.4.0
+  
+  # Audio
+  audioplayers: ^6.5.1
+  
+  # Firebase
+  firebase_core: ^3.8.1
+  firebase_auth: ^5.3.4
+  cloud_firestore: ^5.6.0
+  google_sign_in: ^6.2.2
+  sign_in_with_apple: ^6.1.3
+  crypto: ^3.0.3
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  flutter_svg: ^2.0.10+1
+  icons_plus: ^5.0.0
+  lottie: ^3.3.2
+  iconify_flutter: ^0.0.7
+  onesignal_flutter: ^5.5.0
+  geolocator: ^14.0.2
+  url_launcher: ^6.2.5
+  share_plus: ^12.0.2
+  vibration: ^3.1.8
+  firebase_remote_config: ^5.5.0
+  firebase_analytics: ^11.6.0
+
+  # App Tracking Transparency (iOS 14+) — required when Info.plist declares tracking
+  app_tracking_transparency: ^2.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.7
+  riverpod_generator: ^2.3.9
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#1a1a2e"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+  min_sdk_android: 21
+
+flutter:
+  generate: true
+  uses-material-design: true
+  
+  assets:
+    - assets/icon/
+    - assets/lottie/
+    - assets/lottie/effects/
+    - assets/lottie/results/
+    - assets/lottie/frames/
+    - assets/sounds/
+    - assets/frames/
+    - assets/effects/
+    - assets/themes/
+    - assets/badges/monthly/
+    - assets/badges/profile/
+    - assets/ranks/
+    - assets/divisions/
+    - assets/achievements/
+    - assets/difficulty/
+    - assets/medals/
+    - assets/bots/

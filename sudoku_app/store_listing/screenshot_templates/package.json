@@ -1,0 +1,13 @@
+{
+  "name": "sudoq-screenshot-generator",
+  "version": "1.0.0",
+  "description": "Generate Play Store screenshots for SudoQ app in 11 languages",
+  "scripts": {
+    "generate": "node generate.js",
+    "generate:en": "node generate.js en-US",
+    "generate:tr": "node generate.js tr-TR"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}

@@ -1,0 +1,51 @@
+# Flutter
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/*.g.dart
+**/*.freezed.dart
+**/*.mocks.dart
+
+# Firebase / Secrets — NEVER commit these
+sudoku_app/functions/.env
+sudoku_app/ios/Runner/GoogleService-Info.plist
+**/google-services.json
+**/GoogleService-Info.plist
+
+# iOS
+sudoku_app/ios/Pods/
+sudoku_app/ios/.symlinks/
+sudoku_app/ios/Flutter/Flutter.framework
+sudoku_app/ios/Flutter/Flutter.podspec
+sudoku_app/ios/Flutter/Generated.xcconfig
+sudoku_app/ios/Flutter/app.flx
+sudoku_app/ios/Flutter/app.zip
+sudoku_app/ios/Flutter/flutter_assets/
+sudoku_app/ios/ServiceDefinitions.json
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+**/*.xcodeproj/project.xcworkspace/
+**/DerivedData/
+
+# Android
+sudoku_app/android/.gradle/
+sudoku_app/android/captures/
+sudoku_app/android/local.properties
+sudoku_app/android/key.properties
+**/*.jks
+**/*.keystore
+
+# Node / Firebase Functions
+sudoku_app/functions/node_modules/
+sudoku_app/functions/lib/
+
+# IDE
+.idea/
+*.iml
+**/.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db

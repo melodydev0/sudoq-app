@@ -1,0 +1,117 @@
+============================================================
+GOOGLE PLAY DATA SAFETY FORM - ANSWERS (REVISED)
+============================================================
+Use these answers when filling out the Data Safety section
+in Google Play Console > Policy > App content > Data safety
+
+============================================================
+OVERVIEW
+============================================================
+
+Q: Does your app collect or share any of the required user data types?
+A: YES
+
+Q: Is all of the user data collected by your app encrypted in transit?
+A: YES (Firebase uses TLS/SSL for all communication)
+
+Q: Do you provide a way for users to request that their data is deleted?
+A: YES (in-app account deletion + email support@melodyyazilim.com.tr)
+
+============================================================
+DATA TYPES - COLLECTED
+============================================================
+
+1. LOCATION
+   - Approximate location: YES (geolocator with LocationAccuracy.low)
+     → Collected: Yes | Shared: No | Required: No (permission optional)
+     → Purpose: App functionality (country-based leaderboards)
+   - Precise location: NO (code uses low accuracy only)
+
+2. PERSONAL INFO
+   - Name: YES (display name from Google/Apple Sign-In)
+     → Collected: Yes | Shared: No | Required: No (guest play available)
+     → Purpose: App functionality (profile display, leaderboards)
+   - Email address: YES (from Google/Apple Sign-In)
+     → Collected: Yes | Shared: No | Required: No
+     → Purpose: Account management
+   - User IDs: YES (Firebase UID)
+     → Collected: Yes | Shared: No | Required: Yes
+     → Purpose: App functionality
+   - Other (profile photo URL from OAuth): included as part of account info
+
+3. FINANCIAL INFO
+   - Purchase history: YES (subscription status, product IDs)
+     → Collected: Yes | Shared: No | Required: No
+     → Purpose: App functionality (premium entitlement)
+
+4. PHOTOS AND VIDEOS
+   - Photos: NO (no camera/gallery access; OAuth profile URL is not user photo)
+   - Videos: NO
+
+5. APP ACTIVITY
+   - App interactions: YES (gameplay stats, achievements, duel history)
+     → Collected: Yes | Shared: No | Required: Yes
+     → Purpose: App functionality
+   - In-app search history: NO
+   - Other user-generated content: NO
+
+6. WEB BROWSING: NO
+
+7. APP INFO AND PERFORMANCE
+   - Crash logs: NO (Firebase Crashlytics is NOT in the project)
+   - Diagnostics: NO (no analytics/diagnostics SDK integrated)
+   - Other app performance data: NO
+
+8. DEVICE OR OTHER IDS
+   - Device or other IDs: YES (advertising ID via AdMob, Firebase instance ID)
+     → Collected: Yes | Shared: Yes (with AdMob for ad serving)
+     → Required: No (premium users don't see ads)
+     → Purpose: Advertising
+
+============================================================
+DATA TYPES - SHARED
+============================================================
+
+Only shared with third parties:
+- Device IDs → shared with Google AdMob (advertising purpose)
+  (Not shared for premium/ad-free users)
+
+Third-party service providers (NOT "sharing" per Google's definition):
+- Firebase/Firestore → backend data storage (Google)
+- OneSignal → push notifications (receives Firebase UID for targeting)
+- Google Play / Apple → purchase verification
+
+============================================================
+DATA HANDLING
+============================================================
+
+Q: Is data processed ephemerally?
+A: No (data is stored persistently in Firestore)
+
+Q: Can users request data deletion?
+A: Yes (in-app account deletion + email to support@melodyyazilim.com.tr)
+
+============================================================
+SUMMARY FOR PLAY CONSOLE
+============================================================
+
+Collected & Shared:
+  - Device IDs (shared with AdMob for advertising)
+
+Collected but NOT Shared:
+  - Approximate location (app functionality)
+  - Name (app functionality)
+  - Email (account management)
+  - User IDs (app functionality)
+  - Purchase history (app functionality)
+  - App interactions (app functionality)
+
+NOT Collected:
+  - Precise location
+  - Photos and videos
+  - Crash logs, diagnostics
+  - Messages, contacts, calendar
+  - Audio, video files
+  - Files and documents
+  - Health and fitness
+  - Web browsing history
