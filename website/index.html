@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SudoQ – Legal</title>
+  <meta name="description" content="SudoQ legal documents – EULA, Privacy Policy, Terms of Service" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f14;
+      --card: #1a1a24;
+      --accent: #6c63ff;
+      --text: #e8e8f0;
+      --muted: #8888aa;
+      --border: #2a2a3a;
+      --radius: 16px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .logo { font-size: 48px; margin-bottom: 12px; }
+    h1 { font-size: 36px; font-weight: 700; letter-spacing: -1px; margin-bottom: 8px; }
+    h1 span { color: var(--accent); }
+    .subtitle { color: var(--muted); font-size: 17px; margin-bottom: 48px; }
+    .cards {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 720px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      width: 200px;
+      text-align: center;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color .2s, transform .2s;
+    }
+    .card:hover { border-color: var(--accent); transform: translateY(-3px); }
+    .card .icon { font-size: 36px; margin-bottom: 12px; }
+    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .card p { font-size: 13px; color: var(--muted); }
+    footer { margin-top: 60px; font-size: 13px; color: var(--muted); text-align: center; }
+    footer a { color: var(--muted); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="logo">🧩</div>
+  <h1>Sudo<span>Q</span></h1>
+  <p class="subtitle">Legal Documents</p>
+
+  <div class="cards">
+    <a href="/eula" class="card">
+      <div class="icon">📄</div>
+      <h2>EULA</h2>
+      <p>End User License Agreement</p>
+    </a>
+    <a href="/privacy" class="card">
+      <div class="icon">🔒</div>
+      <h2>Privacy Policy</h2>
+      <p>How we handle your data</p>
+    </a>
+    <a href="/terms" class="card">
+      <div class="icon">⚖️</div>
+      <h2>Terms of Service</h2>
+      <p>Rules & conditions of use</p>
+    </a>
+  </div>
+
+  <footer>
+    <p>© 2026 Melody Yazılım · <a href="mailto:support@sudoq.app">support@sudoq.app</a></p>
+  </footer>
+</body>
+</html>
